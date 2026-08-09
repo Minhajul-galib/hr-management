@@ -1,0 +1,326 @@
+/* Dashboard specific styles */
+
+/* Smooth animations for metric cards */
+.metric-card {
+    transition: all 0.3s ease;
+}
+
+.metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+
+/* Chart container improvements */
+.chart-container {
+    position: relative;
+}
+
+.chart-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(16, 185, 129, 0.05) 100%);
+    border-radius: 0.5rem;
+    pointer-events: none;
+}
+
+/* Progress bar animations */
+.progress-bar {
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Activity indicators */
+.activity-indicator {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+/* Responsive improvements */
+@media (max-width: 768px) {
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+    
+    .metric-card {
+        padding: 1rem;
+    }
+    
+    .chart-container {
+        height: 250px;
+    }
+}
+
+/* Loading states */
+.loading-skeleton {
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: loading 1.5s infinite;
+}
+
+@keyframes loading {
+    0% {
+        background-position: 200% 0;
+    }
+    100% {
+        background-position: -200% 0;
+    }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+    .metric-card {
+        background-color: #1f2937;
+        border-color: #374151;
+    }
+    
+    .chart-container {
+        background-color: #1f2937;
+    }
+}
+
+/* Sidebar Collapsible Styles */
+.sidebar-transition {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-collapsed {
+    width: 4rem;
+}
+
+.sidebar-expanded {
+    width: 16rem;
+}
+
+/* Sidebar menu item animations */
+.sidebar-menu-item {
+    transition: all 0.2s ease-in-out;
+    position: relative;
+    overflow: hidden;
+}
+
+.sidebar-menu-item:hover {
+    transform: translateX(2px);
+}
+
+.sidebar-menu-item.active {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(16, 185, 129, 0.1) 100%);
+}
+
+/* Tooltip for collapsed sidebar */
+.sidebar-tooltip {
+    position: absolute;
+    left: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    margin-left: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background-color: #1f2937;
+    color: white;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease-in-out;
+    z-index: 50;
+}
+
+.sidebar-menu-item:hover .sidebar-tooltip {
+    opacity: 1;
+}
+
+/* Smooth text transitions */
+.sidebar-text {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-text.hidden {
+    opacity: 0;
+    width: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+/* Mobile sidebar overlay */
+@media (max-width: 768px) {
+    .mobile-sidebar-overlay {
+        position: fixed;
+        inset: 0;
+        background-color: rgba(0, 0, 0, 0.5);
+        z-index: 40;
+        transition: opacity 0.3s ease-in-out;
+    }
+    
+    .mobile-sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 16rem;
+        background-color: white;
+        z-index: 50;
+        transform: translateX(-100%);
+        transition: transform 0.3s ease-in-out;
+    }
+    
+    .mobile-sidebar.open {
+        transform: translateX(0);
+    }
+}
+
+/* Icon animations */
+.sidebar-icon {
+    transition: all 0.2s ease-in-out;
+}
+
+.sidebar-menu-item:hover .sidebar-icon {
+    transform: scale(1.1);
+}
+
+/* Toggle button styles */
+.sidebar-toggle {
+    transition: all 0.2s ease-in-out;
+}
+
+.sidebar-toggle:hover {
+    background-color: rgba(59, 130, 246, 0.1);
+    transform: scale(1.05);
+}
+
+/* Responsive adjustments */
+@media (min-width: 768px) {
+    .main-content-expanded {
+        margin-left: 16rem;
+    }
+    
+    .main-content-collapsed {
+        margin-left: 4rem;
+    }
+}
+
+/* Dark Mode Theme Styles */
+@media (prefers-color-scheme: dark) {
+    .sidebar-tooltip {
+        background-color: #374151;
+        color: #f3f4f6;
+    }
+}
+
+/* Dark mode overrides */
+.dark .sidebar-tooltip {
+    background-color: #374151;
+    color: #f3f4f6;
+}
+
+.dark .metric-card {
+    background-color: #1f2937;
+    border-color: #374151;
+    color: #f3f4f6;
+}
+
+.dark .chart-container {
+    background-color: #1f2937;
+}
+
+.dark .chart-container::before {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(16, 185, 129, 0.1) 100%);
+}
+
+.dark .loading-skeleton {
+    background: linear-gradient(90deg, #374151 25%, #4b5563 50%, #374151 75%);
+    background-size: 200% 100%;
+}
+
+/* Theme toggle button styles */
+.theme-toggle {
+    transition: all 0.2s ease-in-out;
+}
+
+.theme-toggle:hover {
+    transform: scale(1.05);
+}
+
+/* Smooth theme transitions */
+* {
+    transition-property: background-color, border-color, color, fill, stroke;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 300ms;
+}
+
+/* Dark mode notification styles */
+.dark .notification-panel {
+    background-color: #1f2937;
+    border-color: #374151;
+}
+
+.dark .notification-item {
+    border-color: #374151;
+}
+
+.dark .notification-item:hover {
+    background-color: #374151;
+}
+
+/* Dark mode dropdown styles */
+.dark .dropdown-content {
+    background-color: #1f2937;
+    border-color: #374151;
+}
+
+.dark .dropdown-item:hover {
+    background-color: #374151;
+}
+
+/* Enhanced focus styles for accessibility */
+.focus\:ring-blue-500:focus {
+    --tw-ring-color: rgb(59 130 246 / 0.5);
+}
+
+.dark .focus\:ring-blue-500:focus {
+    --tw-ring-color: rgb(96 165 250 / 0.5);
+}
+
+/* Custom scrollbar for dark mode */
+.dark ::-webkit-scrollbar {
+    width: 8px;
+}
+
+.dark ::-webkit-scrollbar-track {
+    background: #374151;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+    background: #6b7280;
+    border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+    background: #9ca3af;
+}
+
+/* Animation for theme transitions */
+@keyframes theme-transition {
+    0% {
+        opacity: 0.8;
+    }
+    100% {
+        opacity: 1;
+    }
+}
+
+.theme-transition {
+    animation: theme-transition 0.3s ease-in-out;
+}
