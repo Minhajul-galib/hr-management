@@ -36,15 +36,6 @@ const props = defineProps({
     supplierGradeByTypeDistribution: Object,
     thresholdCreditData: Object,
     suppliers: Array,
-    yarnCountWiseData: {
-        type: Object,
-        default: () => ({
-            labels: [],
-            orderQty: [],
-            receivedQty: [],
-            balanceQty: [],
-        }),
-    },
 });
 
 const debitCreditFromMonth = ref('');
@@ -260,48 +251,6 @@ const unitChartOptions = ref({
             }
         }
     }
-});
-
-// Yarn Count-wise analytical chart
-const yarnCountChartOptions = computed(() => ({
-    chart: { type: 'bar', toolbar: { show: false }, stacked: false },
-    colors: ['#2563EB', '#16A34A', '#DC2626'],
-    plotOptions: {
-        bar: {
-            horizontal: true,
-            borderRadius: 4,
-            barHeight: '60%',
-        },
-    },
-    dataLabels: { enabled: false },
-    xaxis: {
-        categories: props.yarnCountWiseData?.labels || [],
-        labels: {
-            formatter: function (val) {
-                const n = Number(val || 0);
-                if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-                return n.toFixed(0);
-            },
-        },
-    },
-    yaxis: {
-        labels: {
-            style: { fontSize: '12px' },
-        },
-    },
-    legend: { position: 'bottom' },
-    tooltip: {
-        y: {
-            formatter: function (val) {
-                return (Number(val || 0)).toLocaleString() + ' kg';
-            },
-        },
-    },
-}));
-
-const showYarnCountChart = computed(() => {
-    const labels = props.yarnCountWiseData?.labels || [];
-    return labels.length > 0;
 });
 
 const supplierCreditGradeOptions = ref({
@@ -730,22 +679,6 @@ const formattedCredit = computed(() => {
                             :series="[
                                 { name: 'Debit (পেমেন্ট)', data: props.unitCreditDebit?.debit || [] },
                                 { name: 'Credit (বকেয়া)', data: props.unitCreditDebit?.credit || [] }
-                            ]"
-                        ></apexchart>
-                    </ChartCard>
-                </div>
-
-                <!-- Yarn Count-wise Analytics -->
-                <div v-if="showYarnCountChart" class="grid grid-cols-1">
-                    <ChartCard title="Yarn Count-wise Booking Analytics (kg)" :icon="BarChart3" icon-color="text-blue-600">
-                        <apexchart
-                            type="bar"
-                            height="420"
-                            :options="yarnCountChartOptions"
-                            :series="[
-                                { name: 'Order Qty', data: props.yarnCountWiseData?.orderQty || [] },
-                                { name: 'Received Qty', data: props.yarnCountWiseData?.receivedQty || [] },
-                                { name: 'Balance Qty', data: props.yarnCountWiseData?.balanceQty || [] }
                             ]"
                         ></apexchart>
                     </ChartCard>

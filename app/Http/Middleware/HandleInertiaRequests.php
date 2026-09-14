@@ -60,12 +60,25 @@ class HandleInertiaRequests extends Middleware
                 })->toArray(),
             ] : null,
             'appSettings' => [
-                'site_name' => Setting::get('site_name', 'Yearn Management'),
+                'site_name' => Setting::get('site_name', 'HRIS'),
                 'site_logo' => Setting::get('site_logo'),
                 'site_logo_light' => Setting::get('site_logo_light', Setting::get('site_logo')),
                 'site_logo_dark' => Setting::get('site_logo_dark', Setting::get('site_logo')),
                 'site_favicon' => Setting::get('site_favicon'),
             ],
+            'cliftoTalk' => fn () => \App\Services\CliftoTalk::allows($request->user())
+                ? [
+                    'enabled' => true,
+                    'prefix' => \App\Services\CliftoTalk::prefix(),
+                    'brand' => \App\Services\CliftoTalk::brand(),
+                    'unread_total' => app(\App\Services\CliftoTalkService::class)->unreadTotalFor($request->user()),
+                ]
+                : [
+                    'enabled' => false,
+                    'prefix' => \App\Services\CliftoTalk::prefix(),
+                    'brand' => \App\Services\CliftoTalk::brand(),
+                    'unread_total' => 0,
+                ],
             'ziggy' => fn () => [
                 ...(new Ziggy)->toArray(),
                 'location' => $request->url(),

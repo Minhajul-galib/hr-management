@@ -9,6 +9,7 @@ use Illuminate\Notifications\Notifiable;
 use Spatie\Permission\Traits\HasRoles;
 use Lab404\Impersonate\Models\Impersonate;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class User extends Authenticatable
@@ -65,13 +66,39 @@ class User extends Authenticatable
         return $this->belongsTo(Department::class, 'department_id');
     }
 
-    public function createdBookings(): HasMany
+    // ----- Clifto Talk -----
+
+    public function conversationParticipations(): HasMany
     {
-        return $this->hasMany(Booking::class, 'created_by');
+        return $this->hasMany(ConversationParticipant::class);
     }
 
-    public function headedMerchantTeams(): HasMany
+    public function conversations(): BelongsToMany
     {
-        return $this->hasMany(MerchantTeam::class, 'head_user_id');
+        return $this->belongsToMany(Conversation::class, 'conversation_participants')
+            ->withPivot(['role', 'last_read_message_id', 'last_read_at', 'muted_until', 'is_pinned', 'left_at'])
+            ->withTimestamps()
+            ->wherePivotNull('left_at');
+    }
+
+    public function messages(): HasMany
+    {
+        return $this->hasMany(Message::class);
+    }
+
+    /** Initials used by the chat avatars when no photo is available. */
+    public function getInitialsAttribute(): string
+    {
+        $parts = preg_split('/\s+/', trim((string) $this->name)) ?: [];
+        $parts = array_values(array_filter($parts));
+
+        if ($parts === []) {
+            return '?';
+        }
+
+        $first = mb_substr($parts[0], 0, 1);
+        $last = count($parts) > 1 ? mb_substr($parts[count($parts) - 1], 0, 1) : '';
+
+        return mb_strtoupper($first.$last);
     }
 }

@@ -7,17 +7,19 @@ import ResponsiveNavLink from '@/Components/ResponsiveNavLink.vue';
 import { Link, usePage } from '@inertiajs/vue3';
 import axios from 'axios';
 import { useSweetAlert } from '@/composables/useSweetAlert';
-import { 
-    Bell, 
-    Menu, 
+import CliftoTalkDock from '@/Components/CliftoTalk/CliftoTalkDock.vue';
+import { useCliftoTalk } from '@/composables/useCliftoTalk';
+import {
+    Bell,
+    Menu,
     X,
+    MessageCircle,
     LayoutDashboard,
     Calendar,
     CheckSquare,
     Users,
     Shield,
     Building,
-    BarChart3,
     BellRing,
     Settings,
     ChevronLeft,
@@ -27,13 +29,7 @@ import {
     Monitor,
     Package,
     BookOpen,
-    TrendingUp,
     Info,
-    ClipboardList,
-    Factory,
-    UsersRound,
-    Hash,
-    Flame,
     CalendarDays,
 } from 'lucide-vue-next';
 
@@ -48,6 +44,18 @@ const user = computed(() => page.props.auth.user);
 const userRoles = computed(() => page.props.auth.roles || []);
 const userPermissions = computed(() => page.props.auth?.permissions || []);
 const isImpersonating = computed(() => page.props.impersonate?.is_impersonating || false);
+
+// Clifto Talk — the badge reads the live store once the dock has booted,
+// and falls back to the server-rendered count on first paint.
+const cliftoTalk = useCliftoTalk();
+const cliftoTalkEnabled = computed(() => Boolean(page.props.cliftoTalk?.enabled));
+const cliftoTalkBrand = computed(() => page.props.cliftoTalk?.brand || 'Clifto Talk');
+const cliftoTalkUrl = computed(() => `/${page.props.cliftoTalk?.prefix || 'clifto-talk'}`);
+const cliftoTalkUnread = computed(() =>
+    cliftoTalk.state.booted
+        ? cliftoTalk.unreadTotal.value
+        : (page.props.cliftoTalk?.unread_total ?? 0),
+);
 
 // Primary role display name for the header
 const primaryRoleLabel = computed(() => {
@@ -164,23 +172,9 @@ onMounted(() => {
 // Define the menu structure with groups
 const menuGroups = [
     {
-        name: 'Bookings',
+        name: 'Overview',
         items: [
             { name: 'Dashboard', routeName: 'dashboard', permission: 'view dashboard', icon: LayoutDashboard },
-            { name: 'Procurement Follow Up', routeName: 'procurement-followup.index', permission: ['manage procurement followup', 'view procurement followup', 'manage bookings', 'view bookings'], icon: ClipboardList },
-            { name: 'Periodic View', routeName: 'procurement-followup.periodic-view', permission: ['view periodic view', 'manage procurement followup', 'manage bookings'], icon: BarChart3 },
-            { name: 'Periodic View (Rcv Date)', routeName: 'procurement-followup.periodic-view-rcv-date', permission: ['view periodic view rcv date', 'manage procurement followup', 'manage bookings'], icon: Calendar },
-            { name: 'PI Research & Analysis', routeName: 'procurement-followup.pi-wise-analysis', permission: ['view pi wise analysis', 'manage procurement followup', 'manage bookings'], icon: TrendingUp },
-            { name: 'Supplier Order Breakdown', routeName: 'procurement-followup.supplier-breakdown', permission: ['view supplier order breakdown', 'manage procurement followup', 'manage bookings'], icon: Users },
-        ]
-    },
-    {
-        name: 'Masters',
-        items: [
-            { name: 'Suppliers', routeName: 'yarn-suppliers.index', permission: ['manage yarn suppliers', 'view yarn suppliers', 'manage bookings', 'view bookings'], icon: Factory },
-            { name: 'Merchandisers', routeName: 'merchant-teams.index', permission: ['manage merchandisers', 'view merchandisers', 'manage bookings', 'view bookings'], icon: UsersRound },
-            { name: 'Yarn Counts', routeName: 'yarn-counts.index', permission: ['manage yarn counts', 'view yarn counts', 'manage bookings', 'view bookings'], icon: Hash },
-            { name: 'Fiber Types', routeName: 'fiber-types.index', permission: ['manage fiber types', 'view fiber types', 'manage bookings', 'view bookings'], icon: Flame },
         ]
     },
     // {
@@ -193,6 +187,7 @@ const menuGroups = [
     {
         name: 'System',
         items: [
+            { name: 'Clifto Talk', routeName: 'clifto-talk.index', permission: 'access clifto talk', icon: MessageCircle },
             { name: 'Calendar & Todo', routeName: 'calendar.index', permission: 'view calendar', icon: Calendar },
             { name: 'Todos', routeName: 'todos.index', permission: 'access todo', icon: CheckSquare },
             { name: 'Holidays', routeName: 'calendar.holidays.setup', permission: 'manage holidays', icon: CalendarDays },
@@ -334,15 +329,6 @@ const hasAnySystemPermission = (systemName) => {
         'todos': ['access todo', 'manage todos'],
         'dashboard': ['view dashboard'],
         'all bill': ['view bills'],
-        'booking followup': ['manage bookings', 'view bookings'],
-        'procurement follow up': ['manage procurement followup', 'view procurement followup', 'manage bookings', 'view bookings'],
-        'periodic view': ['view periodic view', 'manage procurement followup', 'manage bookings'],
-        'pi research & analysis': ['view pi wise analysis', 'manage procurement followup', 'manage bookings'],
-        'supplier order breakdown': ['view supplier order breakdown', 'manage procurement followup', 'manage bookings'],
-        'suppliers': ['manage yarn suppliers', 'view yarn suppliers', 'manage bookings', 'view bookings'],
-        'merchandisers': ['manage merchandisers', 'view merchandisers', 'manage bookings', 'view bookings'],
-        'yarn counts': ['manage yarn counts', 'view yarn counts', 'manage bookings', 'view bookings'],
-        'fiber types': ['manage fiber types', 'view fiber types', 'manage bookings', 'view bookings'],
     };
     
     // Normalize system name to lowercase
@@ -414,14 +400,7 @@ const getRoute = (name) => {
     return '#';
 };
 
-const BOOKING_SIDEBAR_GROUPS = [
-    ['bookings.index', 'bookings.'],
-    ['procurement-followup.index', 'procurement-followup.import'],
-    ['yarn-suppliers.index', 'yarn-suppliers.'],
-    ['merchant-teams.index', 'merchant-teams.'],
-    ['yarn-counts.index', 'yarn-counts.'],
-    ['fiber-types.index', 'fiber-types.'],
-];
+const SIDEBAR_ROUTE_PREFIX_GROUPS = [];
 
 const isActive = (name) => {
     try {
@@ -442,7 +421,7 @@ const isActive = (name) => {
             return false;
         }
 
-        for (const [indexRoute, prefix] of BOOKING_SIDEBAR_GROUPS) {
+        for (const [indexRoute, prefix] of SIDEBAR_ROUTE_PREFIX_GROUPS) {
             if (name === indexRoute && currentRouteName.startsWith(prefix)) {
                 return true;
             }
@@ -638,6 +617,22 @@ const isActive = (name) => {
                                     </button>
                                 </div>
 
+                                <!-- Clifto Talk -->
+                                <Link
+                                    v-if="cliftoTalkEnabled"
+                                    :href="cliftoTalkUrl"
+                                    class="relative inline-flex items-center rounded-md bg-white dark:bg-gray-800 p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none transition-colors duration-200"
+                                    :title="`${cliftoTalkBrand}${cliftoTalkUnread ? ` — ${cliftoTalkUnread} unread` : ''}`"
+                                >
+                                    <MessageCircle :size="18" />
+                                    <span
+                                        v-if="cliftoTalkUnread > 0"
+                                        class="absolute -top-1 -right-1 inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white bg-indigo-600 rounded-full"
+                                    >
+                                        {{ cliftoTalkUnread > 99 ? '99+' : cliftoTalkUnread }}
+                                    </span>
+                                </Link>
+
                                 <!-- Notifications -->
                                 <div class="relative">
                                     <button
@@ -795,7 +790,7 @@ const isActive = (name) => {
                 <footer class="mt-auto border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 transition-colors duration-300">
                     <div class="px-4 sm:px-6 lg:px-8 py-3">
                         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-600 dark:text-gray-300">
-                            <p>Enterprise Resource Planning System maintained by the Clifton Group ERP Team.</p>
+                            <p>HRIS by the Clifton Group Team.</p>
                             <p class="sm:text-right flex items-center gap-1.5">
                                 Developed by Clifton Group ERP
                                 <Link :href="route('credits')" title="Credits & Acknowledgements" class="inline-flex items-center text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors duration-200">
@@ -808,5 +803,9 @@ const isActive = (name) => {
 
             </div>
         </div>
+
+        <!-- Chat dock: mounted once here so it survives Inertia navigation
+             and keeps its websocket subscriptions. -->
+        <CliftoTalkDock />
     </div>
 </template>

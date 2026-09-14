@@ -26,16 +26,6 @@ class Unit extends Model
         'is_active' => 'boolean',
     ];
 
-    public function bookings(): HasMany
-    {
-        return $this->hasMany(Booking::class, 'unit_id');
-    }
-
-    public function bookingMonthlySnapshots(): HasMany
-    {
-        return $this->hasMany(BookingMonthlySnapshot::class, 'unit_id');
-    }
-
     public function users(): HasMany
     {
         return $this->hasMany(User::class, 'unit_id');

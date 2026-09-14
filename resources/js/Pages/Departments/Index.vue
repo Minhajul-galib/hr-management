@@ -48,7 +48,7 @@ const submitDepartment = () => {
 const { showDeleteConfirm } = useSweetAlert();
 
 const deleteDepartment = async (dept) => {
-    const result = await showDeleteConfirm(`Are you sure you want to delete "<strong>${dept.name}</strong>"?<br><span class="text-sm text-gray-500">Users and merchandiser teams in this department will become unassigned.</span>`);
+    const result = await showDeleteConfirm(`Are you sure you want to delete "<strong>${dept.name}</strong>"?<br><span class="text-sm text-gray-500">Users in this department will become unassigned.</span>`);
     if (result.isConfirmed) {
         router.delete(route('departments.destroy', dept.id), {
             preserveScroll: true,

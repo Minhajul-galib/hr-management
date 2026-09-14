@@ -28,11 +28,6 @@ class Department extends Model
         return $this->hasMany(User::class);
     }
 
-    public function merchantTeams(): HasMany
-    {
-        return $this->hasMany(MerchantTeam::class, 'department_id');
-    }
-
     /**
      * Get active departments only.
      */

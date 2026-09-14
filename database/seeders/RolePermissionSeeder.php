@@ -22,39 +22,6 @@ class RolePermissionSeeder extends Seeder
             'manage hr',
             'view audit logs',
             'impersonate users',
-            'manage bookings',
-            'view bookings',
-            'manage yarn suppliers',
-            'view yarn suppliers',
-            'create yarn suppliers',
-            'edit yarn suppliers',
-            'delete yarn suppliers',
-            'manage merchandisers',
-            'view merchandisers',
-            'create merchandisers',
-            'edit merchandisers',
-            'delete merchandisers',
-            'manage yarn counts',
-            'view yarn counts',
-            'create yarn counts',
-            'edit yarn counts',
-            'delete yarn counts',
-            'manage fiber types',
-            'view fiber types',
-            'create fiber types',
-            'edit fiber types',
-            'delete fiber types',
-            'manage procurement followup',
-            'view procurement followup',
-            'create procurement followup',
-            'edit procurement followup',
-            'delete procurement followup',
-            'import procurement followup',
-            'export procurement followup',
-            'view periodic view',
-            'view periodic view rcv date',
-            'view pi wise analysis',
-            'view supplier order breakdown',
             'manage suppliers',
             'view suppliers',
             'create suppliers',
@@ -126,14 +93,15 @@ class RolePermissionSeeder extends Seeder
             }
         }
 
-        // Remove all users except the primary Super System Admin before seeding.
+        // Remove all users except the primary demo admins before seeding.
         User::withTrashed()
-            ->where('email', '<>', 'admin@erp.com')
+            ->whereNotIn('email', ['admin@erp.com', 'admin@example.com'])
             ->forceDelete();
 
-        // ৪. শুধুমাত্র Super System Admin ডেমো ইউজার তৈরি করা হবে
+        // ৪. Super System Admin ডেমো ইউজার তৈরি করা হবে
         $demoUsers = [
             ['role' => 'Super System Admin', 'name' => 'Super System Admin', 'email' => 'admin@erp.com'],
+            ['role' => 'Super System Admin', 'name' => 'System Admin', 'email' => 'admin@example.com'],
         ];
 
         foreach ($demoUsers as $u) {
