@@ -6,6 +6,8 @@ use Illuminate\Database\Seeder;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\Models\Permission;
 use App\Models\User;
+use App\Models\Department;
+use App\Support\MasterData\MasterDataRegistry;
 use Illuminate\Support\Facades\Hash;
 
 class RolePermissionSeeder extends Seeder
@@ -30,12 +32,21 @@ class RolePermissionSeeder extends Seeder
             'manage documents',
             'manage roles',
             'manage departments',
+            'manage units',
+            'view units',
+            'create units',
+            'edit units',
+            'delete units',
             'access todo',
             'view calendar',
             'manage holidays',
             'manage settings',
             'manage notification settings',
             'view documentation',
+            'access clifto talk',
+            'view audits',
+            'manage audits',
+            'update audit cap',
         ];
 
         // Workflow permissions
@@ -55,13 +66,16 @@ class RolePermissionSeeder extends Seeder
         ];
 
         // পারমিশনগুলো ডাটাবেসে সেভ করা
-        foreach (array_merge($permissions, $workflowPermissions) as $permission) {
+        foreach (array_merge($permissions, $workflowPermissions, MasterDataRegistry::permissionNames()) as $permission) {
             Permission::findOrCreate($permission);
         }
 
         // ২. রোল তৈরি করা (Title Case এ, যাতে ফ্রন্টএন্ডের সাথে মিলে)
+        // Only these four roles exist. "Applicant" is what every new user starts with.
         $roles = [
             'Super System Admin',
+            'Applicant',
+            'Editor',
             'Top Management',
         ];
 
@@ -71,12 +85,24 @@ class RolePermissionSeeder extends Seeder
             'Purchase Head',
             'Accounts Officer',
             'Purchase Officer',
-            'Auditor',
             'DGM',
             'GM',
+            // Dropped when the role set was cut down to the four above.
+            'HR Manager',
+            'HR Executive',
+            'Auditor',
+            'Employee',
         ];
-        Role::whereIn('name', $obsoleteRoles)->get()->each(function ($role) {
-            $role->users()->each(fn ($user) => $user->removeRole($role));
+        $applicant = Role::findOrCreate('Applicant');
+        Role::whereIn('name', $obsoleteRoles)->get()->each(function ($role) use ($applicant) {
+            $role->users()->each(function ($user) use ($role, $applicant) {
+                $user->removeRole($role);
+
+                // Never leave anyone without a role.
+                if ($user->roles()->count() === 0) {
+                    $user->assignRole($applicant);
+                }
+            });
             $role->delete();
         });
 
@@ -88,26 +114,56 @@ class RolePermissionSeeder extends Seeder
                 $role->syncPermissions(Permission::all());
             } elseif ($roleName === 'Top Management') {
                 $role->givePermissionTo([
-                    'view dashboard', 'view accounts', 'workflow-ceo_approved', 'workflow-final_approval'
+                    'view dashboard', 'view accounts', 'workflow-ceo_approved', 'workflow-final_approval',
+                    'view calendar', 'access todo', 'access clifto talk', 'view audits',
                 ]);
+            } elseif ($roleName === 'Editor') {
+                // Phase 1: the Editor enters all master data, so gets full access to every
+                // master (view + manage) and Units. `view dashboard` is the login landing page.
+                $role->givePermissionTo([
+                    'view dashboard',
+                    'manage units', 'view units', 'create units', 'edit units', 'delete units',
+                ]);
+                $role->givePermissionTo(MasterDataRegistry::permissionNames());
             }
         }
 
-        // Remove all users except the primary demo admins before seeding.
-        User::withTrashed()
-            ->whereNotIn('email', ['admin@erp.com', 'admin@example.com'])
-            ->forceDelete();
+        // A production database holds real people. The demo accounts below all share
+        // the password "password", and this seeder also force-deletes every user that
+        // is not one of them — so neither half may ever run against production.
+        // Roles and permissions above are safe to (re)apply there; stop here.
+        if (app()->environment('production')) {
+            $this->command?->warn('Production: roles and permissions seeded; demo users skipped.');
 
-        // ৪. Super System Admin ডেমো ইউজার তৈরি করা হবে
+            return;
+        }
+
+        // ৪. Demo ইউজার তৈরি করা হবে (Super Admin + corporate HR roles)
         $demoUsers = [
-            ['role' => 'Super System Admin', 'name' => 'Super System Admin', 'email' => 'admin@erp.com'],
-            ['role' => 'Super System Admin', 'name' => 'System Admin', 'email' => 'admin@example.com'],
+            ['role' => 'Super System Admin', 'name' => 'Super System Admin', 'email' => 'admin@erp.com', 'department' => null],
+            ['role' => 'Super System Admin', 'name' => 'System Admin', 'email' => 'admin@example.com', 'department' => null],
+            ['role' => 'Editor', 'name' => 'Master Data Editor', 'email' => 'editor@erp.com', 'department' => null],
+            ['role' => 'Top Management', 'name' => 'Mahbubul Alam', 'email' => 'topmanagement@erp.com', 'department' => 'Top Management'],
         ];
 
+        // Remove all users except the demo accounts above before seeding.
+        User::withTrashed()
+            ->whereNotIn('email', collect($demoUsers)->pluck('email')->all())
+            ->forceDelete();
+
         foreach ($demoUsers as $u) {
+            $departmentId = $u['department']
+                ? Department::where('name', $u['department'])->value('id')
+                : null;
+
             $user = User::withTrashed()->updateOrCreate(
                 ['email' => $u['email']],
-                ['name' => $u['name'], 'password' => Hash::make('password'), 'deleted_at' => null]
+                [
+                    'name' => $u['name'],
+                    'password' => Hash::make('password'),
+                    'deleted_at' => null,
+                    'department_id' => $departmentId,
+                ]
             );
 
             if (! $user->hasRole($u['role'])) {

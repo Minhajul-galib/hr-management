@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Unit;
 use App\Models\User;
+use App\Support\MasterData\Code;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
@@ -77,8 +78,10 @@ class UnitController extends Controller
 
     public function store(Request $request)
     {
+        $request->merge(['unit_code' => Code::normalise($request->input('unit_code'))]);
+
         $validated = $request->validate([
-            'unit_code' => 'required|string|unique:units,unit_code|max:50',
+            'unit_code' => ['required', 'string', 'max:'.Code::MAX_LENGTH, 'regex:'.Code::PATTERN, 'unique:units,unit_code'],
             'short_form' => 'nullable|string|max:50',
             'name' => 'required|string|max:255',
             'location' => 'nullable|string|max:255',
@@ -86,7 +89,7 @@ class UnitController extends Controller
             'phone_number' => 'nullable|string|max:20',
             'email' => 'nullable|email|max:255',
             'is_active' => 'boolean',
-        ]);
+        ], ['unit_code.regex' => Code::MESSAGE]);
 
         $validated['created_by'] = auth()->id();
 
@@ -104,8 +107,10 @@ class UnitController extends Controller
 
     public function update(Request $request, Unit $unit)
     {
+        $request->merge(['unit_code' => Code::normalise($request->input('unit_code'))]);
+
         $validated = $request->validate([
-            'unit_code' => 'required|string|max:50|unique:units,unit_code,' . $unit->id,
+            'unit_code' => ['required', 'string', 'max:'.Code::MAX_LENGTH, 'regex:'.Code::PATTERN, 'unique:units,unit_code,'.$unit->id],
             'short_form' => 'nullable|string|max:50',
             'name' => 'required|string|max:255',
             'location' => 'nullable|string|max:255',
@@ -113,7 +118,7 @@ class UnitController extends Controller
             'phone_number' => 'nullable|string|max:20',
             'email' => 'nullable|email|max:255',
             'is_active' => 'boolean',
-        ]);
+        ], ['unit_code.regex' => Code::MESSAGE]);
 
         $unit->update($validated);
 
@@ -169,7 +174,7 @@ class UnitController extends Controller
 
         $sampleRows = [
             [
-                'UNIT001',
+                '101',
                 'HO',
                 'Head Office',
                 'Dhaka, Bangladesh',
@@ -179,7 +184,7 @@ class UnitController extends Controller
                 '1',
             ],
             [
-                'UNIT002',
+                '102',
                 'CTG',
                 'Branch Office - Chittagong',
                 'Chittagong, Bangladesh',
@@ -189,7 +194,7 @@ class UnitController extends Controller
                 '1',
             ],
             [
-                'UNIT003',
+                '103',
                 'GZP',
                 'Warehouse - Gazipur',
                 'Gazipur, Bangladesh',

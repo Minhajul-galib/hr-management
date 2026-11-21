@@ -73,13 +73,27 @@ const markOne = async (id) => {
 };
 
 // Format supplier notification with button-like highlights
+// This result is rendered with v-html below, so every notification body has
+// to be escaped before it's placed in the returned markup — including the
+// plain-text fallback when the supplier-limit pattern doesn't match, since
+// a notification body isn't guaranteed to be free of markup just because it
+// came from the server.
+const escapeHtml = (str) => str
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#039;');
+
 const formatSupplierNotification = (body) => {
   if (!body) return '';
-  
+
+  const escaped = escapeHtml(body);
+
   // Example: "Supplier KBM Computer (CL00148) has used 133.3% of their limit. Due: ৳40,000 / Limit: ৳30,000"
-  const match = body.match(/Supplier (.+?) \((.+?)\) has used (.+?)% of their limit\. Due: ৳(.+?) \/ Limit: ৳(.+?)$/);
-  if (!match) return body;
-  
+  const match = escaped.match(/Supplier (.+?) \((.+?)\) has used (.+?)% of their limit\. Due: ৳(.+?) \/ Limit: ৳(.+?)$/);
+  if (!match) return escaped;
+
   const [, supplierName, supplierCode, percentage, due, limit] = match;
   
   return `Supplier <span class="inline-block px-2 py-1 bg-blue-200 dark:bg-blue-800 rounded font-semibold text-blue-900 dark:text-blue-100">${supplierName}</span> (<span class="inline-block px-2 py-1 bg-green-200 dark:bg-green-800 rounded font-semibold text-green-900 dark:text-green-100">${supplierCode}</span>) has used <span class="inline-block px-2 py-1 bg-red-200 dark:bg-red-800 rounded font-bold text-red-900 dark:text-red-100">${percentage}%</span> of their limit. Due: <span class="inline-block px-2 py-1 bg-orange-200 dark:bg-orange-800 rounded font-semibold text-orange-900 dark:text-orange-100">৳${due}</span> / Limit: <span class="inline-block px-2 py-1 bg-purple-200 dark:bg-purple-800 rounded font-semibold text-purple-900 dark:text-purple-100">৳${limit}</span>`;

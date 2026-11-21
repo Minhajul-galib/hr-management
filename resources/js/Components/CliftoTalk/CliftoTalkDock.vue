@@ -78,7 +78,7 @@ function toggleSound() {
 </script>
 
 <template>
-    <div v-if="enabled && user && !onFullPage" class="pointer-events-none fixed bottom-0 right-0 z-[60] flex items-end gap-3 p-4 print:hidden">
+    <div v-if="enabled && user && !onFullPage" class="pointer-events-none fixed bottom-20 right-0 z-[60] flex items-end gap-3 p-4 print:hidden">
         <!-- Open chat windows -->
         <ChatWindow
             v-for="id in openWindows"

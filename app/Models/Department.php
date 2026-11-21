@@ -10,6 +10,8 @@ class Department extends Model
 {
     protected $fillable = [
         'name',
+        'short_name',
+        'code',
         'description',
         'is_active',
     ];

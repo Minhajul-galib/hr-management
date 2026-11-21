@@ -506,7 +506,7 @@ const getStatusBadgeClass = (isActive) => {
                     </div>
                     
                     <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                        Upload an Excel file (.xlsx, .xls) with unit data. Required columns: unit_code, name. Optional: location, contact_person, phone_number, email, is_active.
+                        Upload an Excel file (.xlsx, .xls) with unit data. Required columns: unit_code (numbers and small letters only, with at least one number, e.g. 101), name. Optional: location, contact_person, phone_number, email, is_active.
                     </p>
 
                     <input

@@ -6,6 +6,7 @@ use App\Models\Unit;
 use Maatwebsite\Excel\Concerns\ToModel;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Concerns\WithValidation;
+use App\Support\MasterData\Code;
 use Illuminate\Support\Facades\Auth;
 
 class UnitsImport implements ToModel, WithHeadingRow, WithValidation
@@ -18,7 +19,7 @@ class UnitsImport implements ToModel, WithHeadingRow, WithValidation
     public function model(array $row)
     {
         return new Unit([
-            'unit_code'       => $row['unit_code'] ?? null,
+            'unit_code'       => Code::normalise($row['unit_code'] ?? null),
             'short_form'      => $row['short_form'] ?? null,
             'name'            => $row['name'] ?? null,
             'location'        => $row['location'] ?? null,
@@ -30,13 +31,26 @@ class UnitsImport implements ToModel, WithHeadingRow, WithValidation
         ]);
     }
 
+    /** Capitals in a code are made small before it is checked, as on the form. */
+    public function prepareForValidation($data, int $index)
+    {
+        $data['unit_code'] = Code::normalise($data['unit_code'] ?? null);
+
+        return $data;
+    }
+
+    public function customValidationMessages()
+    {
+        return ['unit_code.regex' => Code::MESSAGE];
+    }
+
     /**
      * Validation rules
      */
     public function rules(): array
     {
         return [
-            'unit_code' => 'required|string|unique:units,unit_code|max:50',
+            'unit_code' => ['required', 'string', 'max:'.Code::MAX_LENGTH, 'regex:'.Code::PATTERN, 'unique:units,unit_code'],
             'short_form' => 'nullable|string|max:50',
             'name' => 'required|string|max:255',
             'location' => 'nullable|string|max:255',

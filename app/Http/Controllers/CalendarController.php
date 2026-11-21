@@ -7,11 +7,10 @@ use App\Models\HolidaySetting;
 use App\Models\Todo;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
-use Carbon\Carbon;
 use App\Notifications\CalendarReminderNotification;
 use App\Services\NotificationService;
+use App\Support\HtmlSanitizer;
 
 class CalendarController extends Controller
 {
@@ -32,10 +31,10 @@ class CalendarController extends Controller
             ->orderBy('created_at')
             ->get();
 
-        $settings = HolidaySetting::getCurrent();
+        $offDays = HolidaySetting::getCurrent()->offDays();
         $holidaySettings = [
-            'all_fridays' => (bool)($settings->all_fridays ?? false),
-            'weekday_off' => is_array($settings->weekday_off) ? $settings->weekday_off : [],
+            'all_fridays' => in_array(HolidaySetting::FRIDAY, $offDays, true),
+            'weekday_off' => $offDays,
         ];
 
         return Inertia::render('Calendar/Index', [
@@ -75,13 +74,12 @@ class CalendarController extends Controller
 
     public function update(Request $request, CalendarEvent $event)
     {
-        // Check if user owns the event or it's a holiday (only admin can edit holidays)
-        if ($event->user_id !== auth()->id() && !$event->is_holiday) {
+        // Holidays belong to whoever manages holidays, not to whoever typed them in
+        // (the old check named a "Super Admin" role that doesn't exist, so nobody could edit one).
+        if ($event->is_holiday) {
+            abort_unless(auth()->user()->can('manage holidays'), 403, 'Only holiday managers can edit holidays');
+        } elseif ($event->user_id !== auth()->id()) {
             abort(403);
-        }
-
-        if ($event->is_holiday && !auth()->user()->hasRole('Super Admin')) {
-            abort(403, 'Only admins can edit holidays');
         }
 
         $validated = $request->validate([
@@ -102,186 +100,15 @@ class CalendarController extends Controller
 
     public function destroy(CalendarEvent $event)
     {
-        if ($event->user_id !== auth()->id() && !auth()->user()->hasRole('Super Admin')) {
-            abort(403);
-        }
+        $mayDelete = $event->is_holiday
+            ? auth()->user()->can('manage holidays')
+            : $event->user_id === auth()->id();
+
+        abort_unless($mayDelete, 403);
 
         $event->delete();
 
         return back()->with('success', 'Event deleted successfully!');
-    }
-
-    // Holiday management (Admin only)
-    public function createHoliday(Request $request)
-    {
-        // Allow Super Admin variants, MIS and HR roles to create holidays
-        if (!auth()->user()->can('manage holidays')) {
-            abort(403);
-        }
-
-        $validated = $request->validate([
-            'title' => 'required|string|max:255',
-            'description' => 'nullable|string',
-            'start' => 'required|date',
-            'end' => 'nullable|date|after:start',
-            'all_day' => 'boolean',
-        ]);
-
-        CalendarEvent::create([
-            'user_id' => auth()->id(),
-            'is_holiday' => true,
-            'color' => '#dc2626', // Red color for holidays
-            ...$validated
-        ]);
-
-        return back()->with('success', 'Holiday created successfully!');
-    }
-    
-    // Holidays Settings Page
-    public function holidaySettings()
-    {
-        if (!auth()->user()->can('manage holidays')) {
-            abort(403);
-        }
-        
-        $settings = HolidaySetting::getCurrent();
-        $data = [
-            'all_fridays' => (bool)($settings->all_fridays ?? false),
-            'weekday_off' => is_array($settings->weekday_off) ? $settings->weekday_off : [],
-        ];
-        
-        return Inertia::render('Holidays/Setup', [
-            'settings' => $data,
-            'canManage' => true,
-        ]);
-    }
-    
-    // Update Holidays Settings
-    public function updateHolidaySettings(Request $request)
-    {
-        if (!auth()->user()->can('manage holidays')) {
-            abort(403);
-        }
-        
-        $validated = $request->validate([
-            'all_fridays' => 'required|boolean',
-            'weekday_off' => 'array',
-            'weekday_off.*' => 'integer|min:0|max:6',
-        ]);
-        
-        $settings = HolidaySetting::query()->first();
-        if (!$settings) {
-            $settings = new HolidaySetting();
-        }
-        $settings->all_fridays = $validated['all_fridays'];
-        $settings->weekday_off = $validated['weekday_off'] ?? [];
-        $settings->save();
-        
-        return back()->with('success', 'Holiday settings updated successfully!');
-    }
-    
-    // Bulk Import Holidays from CSV
-    public function importHolidays(Request $request)
-    {
-        if (!auth()->user()->can('manage holidays')) {
-            abort(403);
-        }
-        
-        $request->validate([
-            'file' => 'required|file|mimes:csv,txt',
-        ]);
-        
-        $path = $request->file('file')->getRealPath();
-        $handle = fopen($path, 'r');
-        if ($handle === false) {
-            return back()->with('error', 'Failed to read uploaded file.');
-        }
-        
-        $created = 0;
-        while (($row = fgetcsv($handle)) !== false) {
-            if (count($row) === 0) {
-                continue;
-            }
-            // Expecting date,title or date only
-            $date = trim($row[0] ?? '');
-            $title = trim($row[1] ?? 'Holiday');
-            
-            if (!$date) {
-                continue;
-            }
-            
-            try {
-                $start = Carbon::parse($date)->startOfDay();
-            } catch (\Throwable $e) {
-                continue;
-            }
-            
-            // Avoid duplicates: if a holiday exists on this date
-            $exists = CalendarEvent::query()
-                ->whereDate('start', $start->toDateString())
-                ->where('is_holiday', true)
-                ->exists();
-            
-            if ($exists) {
-                continue;
-            }
-            
-            CalendarEvent::create([
-                'user_id' => auth()->id(),
-                'title' => $title,
-                'description' => null,
-                'start' => $start,
-                'end' => null,
-                'all_day' => true,
-                'is_holiday' => true,
-                'color' => '#dc2626',
-            ]);
-            $created++;
-        }
-        fclose($handle);
-        
-        return back()->with('success', "Imported {$created} holidays successfully.");
-    }
-
-    // Import a single holiday (from a date + title form)
-    public function importSingleHoliday(Request $request)
-    {
-        if (!auth()->user()->can('manage holidays')) {
-            abort(403);
-        }
-
-        $validated = $request->validate([
-            'date' => 'required|date',
-            'title' => 'nullable|string|max:255',
-        ]);
-
-        try {
-            $start = Carbon::parse($validated['date'])->startOfDay();
-        } catch (\Throwable $e) {
-            return back()->with('error', 'Invalid date provided.');
-        }
-
-        $exists = CalendarEvent::query()
-            ->whereDate('start', $start->toDateString())
-            ->where('is_holiday', true)
-            ->exists();
-
-        if ($exists) {
-            return back()->with('error', 'A holiday already exists on that date.');
-        }
-
-        CalendarEvent::create([
-            'user_id' => auth()->id(),
-            'title' => $validated['title'] ?: 'Holiday',
-            'description' => null,
-            'start' => $start,
-            'end' => null,
-            'all_day' => true,
-            'is_holiday' => true,
-            'color' => '#dc2626',
-        ]);
-
-        return back()->with('success', 'Holiday added successfully.');
     }
 
     // Todo management
@@ -309,7 +136,11 @@ class CalendarController extends Controller
             'assigned_by' => $assignedBy,
             'order' => $maxOrder + 1,
             'task' => $validated['task'],
-            'description' => $validated['description'],
+            // Description is rich text rendered with v-html for whoever the
+            // todo is assigned to, so it's sanitized on the way in — not
+            // just escaped in the summernote editor, which a direct API
+            // call bypasses entirely.
+            'description' => HtmlSanitizer::clean($validated['description'] ?? null),
             'status' => $validated['status'] ?? 'Assigned',
             'type' => $validated['type'] === 'assign' ? 'public' : 'personal',
             'priority' => $validated['priority'] ?? 'medium',
@@ -363,6 +194,10 @@ class CalendarController extends Controller
             'category' => 'nullable|string|max:100',
         ]);
 
+        if (array_key_exists('description', $validated)) {
+            $validated['description'] = HtmlSanitizer::clean($validated['description']);
+        }
+
         $todo->update($validated);
 
         return back()->with('success', 'Todo updated successfully!');
@@ -370,9 +205,6 @@ class CalendarController extends Controller
 
     public function updateTodoOrder(Request $request)
     {
-        // Temporary debug logging to confirm incoming payload and HTTP method
-        Log::info('updateTodoOrder called', ['method' => $request->method(), 'payload' => $request->all()]);
-
         $validated = $request->validate([
             'todos' => 'required|array',
             'todos.*.id' => 'required|exists:todos,id',

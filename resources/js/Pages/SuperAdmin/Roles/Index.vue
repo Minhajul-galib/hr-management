@@ -14,6 +14,8 @@ import { Pencil, Trash2 } from 'lucide-vue-next';
 const props = defineProps({
     roles: Array,
     permissions: Array,
+    // Every master-data screen: [{ label, view, manage }], from the server's registry.
+    masterData: { type: Array, default: () => [] },
 });
 
 const showRoleModal = ref(false);
@@ -113,20 +115,7 @@ const hasPermission = (role, permissionName) => {
         return true;
     }
     
-    // Debug: Log permission checking
-    console.log(`Checking permission: ${permissionName} for role: ${role.name}`);
-    console.log('Role permissions:', role.permissions.map(p => p.name));
-    
-    const hasPermission = role.permissions.some(p => p.name === permissionName);
-    console.log(`Has permission: ${hasPermission}`);
-    
-    // Special debug for threshold credit summary
-    if (permissionName === 'dashboard view threshold credit summary') {
-        console.log(`🎯 THRESHOLD DEBUG: Checking threshold permission for ${role.name}`);
-        console.log(`🎯 THRESHOLD DEBUG: Has threshold permission: ${hasPermission}`);
-    }
-    
-    return hasPermission;
+    return role.permissions.some(p => p.name === permissionName);
 };
 
 // Map setColor keys to Tailwind bg classes for feature set grouping
@@ -149,28 +138,52 @@ const getSetLabelClass = (feature) => {
 
 const isParentRow = (feature) => feature.name && !feature.name.startsWith('↳');
 
-// Define system features mapping with categories
-const systemFeatures = [
-    { category: 'Core Modules', items: [
-        { name: 'Dashboard', permission: 'view dashboard' },
-        { name: 'Clifto Talk', permission: 'access clifto talk' },
-        { name: 'Calendar & Todo', permission: 'view calendar' },
-        { name: 'Todos', permission: 'access todo' },
-        { name: 'Holidays', permission: 'manage holidays' },
-        { name: 'User Management', permission: 'manage users' },
-        { name: 'Role Management', permission: 'manage roles' },
-        { name: 'Departments', permission: 'manage departments' },
-        { name: 'Settings', permission: 'manage settings' },
-        { name: 'Documentation', permission: 'view documentation' },
-    ]},
-    { category: 'HR & Finance', items: [
-        { name: 'Attendance', permission: 'view attendance' },
-        { name: 'Leave Requests', permission: 'view leave requests' },
-        { name: 'Payroll', permission: 'manage payroll' },
-        { name: 'Reports', permission: 'view reports' },
-        { name: 'Notification Settings', permission: 'manage notification settings' },
-    ]},
+// Master data: each screen gets a "view" row and, under it, an "add / edit / delete" row.
+// Units predate the registry and have their own finer-grained permissions.
+const masterRows = (master) => [
+    { name: master.label, permission: master.view, setColor: 'blue' },
+    { name: '↳ Add / edit / delete', permission: master.manage, setColor: 'blue' },
 ];
+
+const unitRows = [
+    { name: 'Units', permission: 'view units', setColor: 'blue' },
+    { name: '↳ Create', permission: 'create units', setColor: 'blue' },
+    { name: '↳ Edit', permission: 'edit units', setColor: 'blue' },
+    { name: '↳ Delete', permission: 'delete units', setColor: 'blue' },
+    { name: '↳ Full access (manage)', permission: 'manage units', setColor: 'blue' },
+];
+
+// Define system features mapping with categories
+const systemFeatures = computed(() => {
+    // Same order as the sidebar's Master Data group: Departments first, then Units, then the rest.
+    const [departments, ...others] = props.masterData.map(masterRows);
+
+    return [
+        { category: 'Core Modules', items: [
+            { name: 'Dashboard', permission: 'view dashboard' },
+            { name: 'Clifto Talk', permission: 'access clifto talk' },
+            { name: 'Calendar & Todo', permission: 'view calendar' },
+            { name: 'Todos', permission: 'access todo' },
+            { name: 'User Management', permission: 'manage users' },
+            { name: 'Role Management', permission: 'manage roles' },
+            { name: 'Settings', permission: 'manage settings' },
+            { name: 'Documentation', permission: 'view documentation' },
+        ]},
+        { category: 'Master Data', items: [
+            ...(departments ?? []),
+            ...unitRows,
+            ...others.flat(),
+            { name: 'Holidays', permission: 'manage holidays' },
+        ]},
+        { category: 'HR & Finance', items: [
+            { name: 'Attendance', permission: 'view attendance' },
+            { name: 'Leave Requests', permission: 'view leave requests' },
+            { name: 'Payroll', permission: 'manage payroll' },
+            { name: 'Reports', permission: 'view reports' },
+            { name: 'Notification Settings', permission: 'manage notification settings' },
+        ]},
+    ];
+});
 
 </script>
 
@@ -225,7 +238,7 @@ const systemFeatures = [
                                             {{ group.category }}
                                         </td>
                                     </tr>
-                                    <tr v-for="feature in group.items" :key="feature.name" :class="getSetRowClass(feature)">
+                                    <tr v-for="feature in group.items" :key="feature.permission || feature.name" :class="getSetRowClass(feature)">
                                         <td class="border border-gray-300 dark:border-gray-600 px-4 py-2 text-xs sm:text-sm" :class="[getSetLabelClass(feature), isParentRow(feature) && feature.setColor ? 'font-semibold pl-4' : 'font-medium pl-8']">
                                             <span v-if="isParentRow(feature) && feature.setColor"
                                                   class="inline-flex items-center gap-1.5">
@@ -258,13 +271,7 @@ const systemFeatures = [
                         <div class="mt-3 flex flex-wrap items-center gap-3 text-xs text-gray-600 dark:text-gray-400">
                             <span class="font-medium text-gray-500 dark:text-gray-400">Set colors:</span>
                             <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-blue-100 text-blue-700 border border-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800">
-                                <span class="inline-block w-2 h-2 rounded-full bg-blue-400"></span> Supplier Management
-                            </span>
-                            <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-purple-100 text-purple-700 border border-purple-200 dark:bg-purple-900/40 dark:text-purple-300 dark:border-purple-800">
-                                <span class="inline-block w-2 h-2 rounded-full bg-purple-400"></span> Supplier Types
-                            </span>
-                            <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-800">
-                                <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span> Unit Management
+                                <span class="inline-block w-2 h-2 rounded-full bg-blue-400"></span> Master Data: tick the first row to let a role see a screen, the row under it to let it add, edit and delete
                             </span>
                         </div>
                     </div>

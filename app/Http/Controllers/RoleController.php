@@ -9,6 +9,7 @@ use Spatie\Permission\PermissionRegistrar;
 use Inertia\Inertia;
 use App\Models\User;
 use App\Notifications\RolePermissionUpdatedNotification;
+use App\Support\MasterData\MasterDataRegistry;
 use Illuminate\Support\Carbon;
 
 class RoleController extends Controller
@@ -61,6 +62,9 @@ class RoleController extends Controller
             'manage notification settings',
             'manage settings',
             'manage document statuses',
+            'view audits',
+            'manage audits',
+            'update audit cap',
             // Workflow Permissions
             'workflow-purchase_draft',
             'workflow-purchase_approval',
@@ -85,7 +89,7 @@ class RoleController extends Controller
             'dashboard view recent activities',
             'dashboard view total documents',
         ];
-        foreach ($basePermissions as $perm) {
+        foreach (array_merge($basePermissions, MasterDataRegistry::permissionNames()) as $perm) {
             Permission::firstOrCreate(['name' => $perm]);
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();
@@ -100,6 +104,13 @@ class RoleController extends Controller
         return Inertia::render('SuperAdmin/Roles/Index', [
             'roles' => Role::with('permissions')->get(),
             'permissions' => Permission::all(),
+            // Every master-data screen, for the permission matrix. Built from the
+            // registry so a new master shows up there without touching the page.
+            'masterData' => collect(MasterDataRegistry::all())->map(fn (array $master) => [
+                'label' => $master['label'],
+                'view' => 'view '.$master['permission'],
+                'manage' => 'manage '.$master['permission'],
+            ])->values(),
         ]);
     }
 

@@ -3,6 +3,7 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue';
 import { Head, router, usePage } from '@inertiajs/vue3';
 import axios from 'axios';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
+import { useSweetAlert } from '@/composables/useSweetAlert';
 import draggable from 'vuedraggable';
 import {
     Calendar,
@@ -34,33 +35,34 @@ const props = defineProps({
 
 const canAccessTodo = computed(() => !!props.canAccessTodo);
 
+// Every calendar day (YYYY-MM-DD) a holiday covers. The server lists them all, so a
+// 3-day Eid is marked on three days; older payloads fall back to the start date.
+// Read from the string, not a Date, to avoid timezone shifts.
+function holidayDays(event) {
+    const dates = event.extendedProps && event.extendedProps.dates;
+    if (Array.isArray(dates) && dates.length) return dates;
+
+    const m = String(event.start || event.startStr || '').match(/\d{4}-\d{2}-\d{2}/);
+    return m ? [m[0]] : [];
+}
+
+const holidayEvents = computed(() => (props.events || []).filter(e => e.extendedProps && e.extendedProps.isHoliday));
+
 // Compute holiday dates set for highlighting day cells (reactive)
-const holidayDates = computed(() => new Set(
-    (props.events || [])
-        .filter(e => e.extendedProps && e.extendedProps.isHoliday)
-        .map(e => {
-            // Extract YYYY-MM-DD directly from the start string to avoid timezone shifts
-            const s = String(e.start || e.startStr || '');
-            const m = s.match(/\d{4}-\d{2}-\d{2}/);
-            return m ? m[0] : '';
-        }).filter(Boolean)
-));
+const holidayDates = computed(() => new Set(holidayEvents.value.flatMap(holidayDays)));
 
 // Map of date (YYYY-MM-DD) -> array of holiday titles for that date
 const holidayMap = computed(() => {
     const map = {};
-    (props.events || [])
-        .filter(e => e.extendedProps && e.extendedProps.isHoliday)
-        .forEach(e => {
-            const s = String(e.start || e.startStr || '');
-            const m = s.match(/\d{4}-\d{2}-\d{2}/);
-            const key = m ? m[0] : null;
-            if (!key) return;
+    holidayEvents.value.forEach(e => {
+        // Prefer explicit title, fall back to extendedProps.title
+        const title = e.title || (e.extendedProps && e.extendedProps.title) || '';
+        if (!title) return;
+        holidayDays(e).forEach(key => {
             if (!map[key]) map[key] = [];
-            // Prefer explicit title, fall back to extendedProps.title
-            const title = e.title || (e.extendedProps && e.extendedProps.title) || '';
-            if (title) map[key].push(title);
+            map[key].push(title);
         });
+    });
     return map;
 });
 
@@ -315,6 +317,11 @@ function saveEvent() {
             preserveScroll: true,
             onSuccess: () => {
                 showEventModal.value = false;
+            },
+            // e.g. "Victory Day is already a holiday on 16 Dec 2026" — say so instead of failing silently.
+            onError: (errors) => {
+                const message = Object.values(errors)[0];
+                if (message) useSweetAlert().showError(String(message), "Couldn't save");
             }
         });
     }

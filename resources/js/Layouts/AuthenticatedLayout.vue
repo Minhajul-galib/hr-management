@@ -4,7 +4,7 @@ import ApplicationLogo from '@/Components/ApplicationLogo.vue';
 import Dropdown from '@/Components/Dropdown.vue';
 import DropdownLink from '@/Components/DropdownLink.vue';
 import ResponsiveNavLink from '@/Components/ResponsiveNavLink.vue';
-import { Link, usePage } from '@inertiajs/vue3';
+import { Link, router, usePage } from '@inertiajs/vue3';
 import axios from 'axios';
 import { useSweetAlert } from '@/composables/useSweetAlert';
 import CliftoTalkDock from '@/Components/CliftoTalk/CliftoTalkDock.vue';
@@ -31,6 +31,14 @@ import {
     BookOpen,
     Info,
     CalendarDays,
+    ClipboardCheck,
+    Briefcase,
+    Percent,
+    Layers,
+    CalendarOff,
+    ShieldAlert,
+    ClipboardList,
+    FileText,
 } from 'lucide-vue-next';
 
 const showingNavigationDropdown = ref(false);
@@ -173,6 +181,7 @@ onMounted(() => {
 const menuGroups = [
     {
         name: 'Overview',
+        hideTitle: true,
         items: [
             { name: 'Dashboard', routeName: 'dashboard', permission: 'view dashboard', icon: LayoutDashboard },
         ]
@@ -185,16 +194,34 @@ const menuGroups = [
     //     ]
     // },
     {
+        name: 'Compliance',
+        items: [
+            { name: 'Internal Audit', routeName: 'audits.index', permission: ['view audits', 'manage audits', 'update audit cap'], icon: ClipboardCheck },
+        ]
+    },
+    {
+        name: 'Master Data',
+        items: [
+            { name: 'Departments', routeName: 'departments.index', permission: ['view departments', 'manage departments'], icon: Building },
+            { name: 'Units', routeName: 'units.index', permission: ['manage units', 'view units'], icon: Package },
+            { name: 'Designations', routeName: 'designations.index', permission: ['view designations', 'manage designations'], icon: Briefcase },
+            { name: 'Salary Types', routeName: 'salary-types.index', permission: ['view salary types', 'manage salary types'], icon: Percent },
+            { name: 'Grades & Pay Scales', routeName: 'grades.index', permission: ['view grades', 'manage grades'], icon: Layers },
+            { name: 'Leave Types', routeName: 'leave-types.index', permission: ['view leave types', 'manage leave types'], icon: CalendarOff },
+            { name: 'Offence Types', routeName: 'offence-types.index', permission: ['view offence types', 'manage offence types'], icon: ShieldAlert },
+            { name: 'ACR Templates', routeName: 'acr-templates.index', permission: ['view acr templates', 'manage acr templates'], icon: ClipboardList },
+            { name: 'Document Types', routeName: 'document-types.index', permission: ['view document types', 'manage document types'], icon: FileText },
+            { name: 'Holidays', routeName: 'calendar.holidays.setup', permission: 'manage holidays', icon: CalendarDays },
+        ]
+    },
+    {
         name: 'System',
         items: [
             { name: 'Clifto Talk', routeName: 'clifto-talk.index', permission: 'access clifto talk', icon: MessageCircle },
             { name: 'Calendar & Todo', routeName: 'calendar.index', permission: 'view calendar', icon: Calendar },
             { name: 'Todos', routeName: 'todos.index', permission: 'access todo', icon: CheckSquare },
-            { name: 'Holidays', routeName: 'calendar.holidays.setup', permission: 'manage holidays', icon: CalendarDays },
-            { name: 'Units', routeName: 'units.index', permission: ['manage units', 'view units'], icon: Package },
             { name: 'User Management', routeName: 'users.index', permission: 'manage users', icon: Users },
             { name: 'Role Management', routeName: 'roles.index', permission: 'manage roles', icon: Shield },
-            { name: 'Departments', routeName: 'departments.index', permission: 'manage departments', icon: Building },
             { name: 'Notification Settings', routeName: 'notification-settings.index', permission: 'manage notification settings', icon: BellRing },
             { name: 'Settings', routeName: 'settings.index', permission: 'manage settings', icon: Settings },
             { name: 'Documentation', routeName: 'documentation', permission: 'view documentation', icon: BookOpen },
@@ -321,7 +348,7 @@ const hasAnySystemPermission = (systemName) => {
         'payment tracking': ['view ledger', 'manage payment tracking'],
         'user management': ['manage users', 'view users', 'create user', 'edit user', 'delete user'],
         'role management': ['manage roles', 'view roles', 'create role', 'edit role', 'delete role'],
-        'departments': ['manage departments'],
+        'departments': ['manage departments', 'view departments'],
         'notification settings': ['manage notification settings', 'view notification settings'],
         'settings': ['manage settings', 'view settings'],
         'status setup': ['manage document statuses', 'view document statuses'],
@@ -400,7 +427,9 @@ const getRoute = (name) => {
     return '#';
 };
 
-const SIDEBAR_ROUTE_PREFIX_GROUPS = [];
+const SIDEBAR_ROUTE_PREFIX_GROUPS = [
+    ['audits.index', 'audits.'],
+];
 
 const isActive = (name) => {
     try {
@@ -461,9 +490,13 @@ const isActive = (name) => {
                     <span>You are viewing as <strong class="font-semibold">{{ user.name }}</strong></span>
                 </span>
                 <span class="text-amber-300">|</span>
-                <Link :href="route('impersonate.stop')" class="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-800 hover:bg-amber-50 dark:hover:bg-amber-900/30 px-2.5 py-1 rounded-md transition-colors duration-150">
+                <button
+                    type="button"
+                    @click="router.post(route('impersonate.stop'))"
+                    class="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-800 hover:bg-amber-50 dark:hover:bg-amber-900/30 px-2.5 py-1 rounded-md transition-colors duration-150"
+                >
                     Exit Session
-                </Link>
+                </button>
             </div>
         </div>
  
@@ -504,7 +537,7 @@ const isActive = (name) => {
                         <div class="space-y-1">
                                                         <template v-for="(group, gIndex) in menuGroups" :key="gIndex">
                                 <div v-if="hasAccessToGroup(group)" :class="{'mt-4': gIndex > 0}">
-                                    <h3 v-if="!sidebarCollapsed" class="px-3 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-2">
+                                    <h3 v-if="!sidebarCollapsed && !group.hideTitle" class="px-3 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-2">
                                         <span class="h-px bg-gray-200 dark:bg-gray-700 flex-1"></span>
                                         {{ group.name }}
                                         <span class="h-px bg-gray-200 dark:bg-gray-700 flex-1"></span>
@@ -553,7 +586,9 @@ const isActive = (name) => {
             <!-- Main Content Wrapper -->
             <div 
                 :class="[
-                    'flex-1 flex flex-col transition-all duration-300 ease-in-out',
+                    // min-w-0: without it this flex item grows to its widest table, and on
+                    // a phone the whole page zooms out instead of the table scrolling.
+                    'flex-1 min-w-0 flex flex-col transition-all duration-300 ease-in-out',
                     sidebarCollapsed ? 'md:ml-0' : 'md:ml-0'
                 ]"
             >
@@ -731,7 +766,7 @@ const isActive = (name) => {
                         <div class="space-y-1 pb-3 pt-2">
                                                           <template v-for="(group, gIndex) in menuGroups" :key="gIndex">
                                 <div v-if="hasAccessToGroup(group)" class="pt-2 pb-1">
-                                    <div class="px-4 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">
+                                    <div v-if="!group.hideTitle" class="px-4 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">
                                         {{ group.name }}
                                     </div>
                                     <template v-for="(item, iIndex) in group.items" :key="iIndex">

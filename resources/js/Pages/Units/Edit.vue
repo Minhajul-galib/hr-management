@@ -70,7 +70,8 @@ const submit = () => {
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
                                 <InputLabel for="unit_code" value="Unit Code *" />
-                                <TextInput id="unit_code" v-model="form.unit_code" type="text" class="mt-1 block w-full" required />
+                                <TextInput id="unit_code" v-model="form.unit_code" type="text" class="mt-1 block w-full lowercase" autocapitalize="off" placeholder="e.g. 101" required />
+                                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Unique. Numbers and small letters only, with at least one number.</p>
                                 <InputError :message="form.errors.unit_code" class="mt-2" />
                             </div>
 

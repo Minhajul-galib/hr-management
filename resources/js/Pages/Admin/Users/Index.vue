@@ -1,6 +1,6 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
-import { Head, useForm } from '@inertiajs/vue3';
+import { Head, router, useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
@@ -147,9 +147,15 @@ const forceDeleteUser = async (user) => {
                                         </span>
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap text-center">
-                                        <a v-if="isSuperAdmin && user.id !== currentUser.id" :href="route('impersonate.start', user.id)" class="inline-flex items-center text-purple-600 hover:text-purple-900 dark:text-purple-400 dark:hover:text-purple-300" title="Impersonate User">
+                                        <button
+                                            v-if="isSuperAdmin && user.id !== currentUser.id"
+                                            type="button"
+                                            @click="router.post(route('impersonate.start', user.id))"
+                                            class="inline-flex items-center text-purple-600 hover:text-purple-900 dark:text-purple-400 dark:hover:text-purple-300"
+                                            title="Impersonate User"
+                                        >
                                             <UserPlus :size="18" />
-                                        </a>
+                                        </button>
                                         <span v-else class="text-gray-300 dark:text-gray-600">-</span>
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium flex justify-end gap-2">

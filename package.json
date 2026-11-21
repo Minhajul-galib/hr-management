@@ -4,7 +4,8 @@
     "type": "module",
     "scripts": {
         "build": "vite build && vite build --ssr",
-        "dev": "vite"
+        "dev": "vite",
+        "dev:all": "concurrently -c \"#c4b5fd,#fb7185,#fdba74,#93c5fd\" -n vite,reverb,queue,schedule --kill-others \"vite\" \"php artisan reverb:start --port=8080\" \"php artisan queue:listen --tries=1\" \"php artisan schedule:work\""
     },
     "devDependencies": {
         "@inertiajs/vue3": "^2.0.0",

@@ -25,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\HandleInertiaRequests::class,
             \Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets::class,
             \App\Http\Middleware\ImpersonationMiddleware::class,
+            \App\Http\Middleware\SecurityHeaders::class,
         ]);
 
         $middleware->alias([
@@ -35,10 +36,6 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->respond(function (Response $response, \Throwable $exception, Request $request) {
-            # #region debug-point D:exception-respond
-            @file_get_contents('http://127.0.0.1:7777/event', false, stream_context_create(['http' => ['method' => 'POST', 'header' => "Content-Type: application/json\r\n", 'content' => json_encode(['sessionId' => 'pi-wise-analysis-500', 'runId' => 'pre-fix', 'hypothesisId' => 'D', 'location' => 'bootstrap/app.php:exceptions->respond', 'msg' => '[DEBUG] Laravel exception responder invoked', 'data' => ['status' => $response->getStatusCode(), 'url' => $request->fullUrl(), 'exception' => get_class($exception), 'message' => $exception->getMessage()], 'ts' => round(microtime(true) * 1000)])]]));
-            # #endregion
-
             if ($request->expectsJson()) {
                 return $response;
             }

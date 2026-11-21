@@ -43,6 +43,7 @@ class HandleInertiaRequests extends Middleware
                     ? Permission::pluck('name')
                     : $request->user()?->getAllPermissions()->pluck('name'),
             ],
+            'flash' => fn () => $request->session()->only(['success', 'error', 'warning', 'info']),
             'impersonate' => [
                 'is_impersonating' => $request->session()->has('impersonator_id'),
                 'impersonator_id' => $request->session()->get('impersonator_id'),

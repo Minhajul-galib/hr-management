@@ -396,13 +396,31 @@ class CliftoTalkController extends Controller
 
         abort_unless($disk->exists($attachment->path), 404);
 
-        // Attachments live on the private disk, so every read goes through this
-        // membership check rather than a guessable public URL.
+        // Uploads accept any file type (see storeMessage's validation), so a
+        // member could attach an .html/.svg file that a browser would happily
+        // execute as a document if it were ever handed back inline with its
+        // own claimed type. Only a small allowlist of formats that browsers
+        // cannot execute as active content is ever rendered inline; anything
+        // else is always forced to download, and its Content-Type is not
+        // trusted verbatim, so a spoofed mime can never be reflected back and
+        // rendered as a page on this origin.
+        $safeInlineMimes = [
+            'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp',
+            'application/pdf',
+            'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/webm',
+            'video/mp4', 'video/webm', 'video/ogg',
+        ];
+
+        $canInline = in_array($attachment->mime_type, $safeInlineMimes, true);
+
         return $disk->response(
             $attachment->path,
             $attachment->original_name,
-            ['Content-Type' => $attachment->mime_type ?: 'application/octet-stream'],
-            $request->boolean('download') ? 'attachment' : 'inline',
+            [
+                'Content-Type' => $canInline ? $attachment->mime_type : 'application/octet-stream',
+                'X-Content-Type-Options' => 'nosniff',
+            ],
+            ($canInline && !$request->boolean('download')) ? 'inline' : 'attachment',
         );
     }
 

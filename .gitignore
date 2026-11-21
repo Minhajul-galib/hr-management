@@ -40,3 +40,5 @@ deploy.sh
 # Windows Zone.Identifier files
 *Zone.Identifier
 *:Zone.Identifier
+
+.claude/settings.local.json

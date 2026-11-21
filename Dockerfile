@@ -24,6 +24,13 @@ RUN npm install && npm run build
 # Cache Laravel config
 RUN php artisan storage:link || true
 
+# .dockerignore keeps runtime data (uploads, logs, caches) out of the image, which can
+# leave these folders missing. Create them so they exist and belong to www-data -
+# the uploads volume mounted on storage/app inherits that ownership.
+RUN mkdir -p storage/app/private storage/app/public \
+        storage/framework/cache/data storage/framework/sessions storage/framework/views \
+        storage/logs bootstrap/cache
+
 RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
 
 USER www-data

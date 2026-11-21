@@ -40,10 +40,13 @@ class SettingController extends Controller
             'site_email' => 'nullable|email|max:255',
             'site_phone' => 'nullable|string|max:50',
             'site_address' => 'nullable|string|max:500',
-            // Use file validation instead of image so SVG/ICO are accepted reliably.
-            'site_logo' => 'nullable|file|mimes:jpeg,png,jpg,svg,webp|max:2048',
-            'site_logo_light' => 'nullable|file|mimes:jpeg,png,jpg,svg,webp|max:2048',
-            'site_logo_dark' => 'nullable|file|mimes:jpeg,png,jpg,svg,webp|max:2048',
+            // Use file validation instead of image so ICO is accepted reliably.
+            // SVG is deliberately excluded: it can carry a <script>, and a
+            // logo uploaded here is served straight back from /storage — a
+            // direct visit to that URL would run it as a same-origin page.
+            'site_logo' => 'nullable|file|mimes:jpeg,png,jpg,webp|max:2048',
+            'site_logo_light' => 'nullable|file|mimes:jpeg,png,jpg,webp|max:2048',
+            'site_logo_dark' => 'nullable|file|mimes:jpeg,png,jpg,webp|max:2048',
             'site_favicon' => 'nullable|file|mimes:x-icon,png,ico|max:512',
         ]);
 

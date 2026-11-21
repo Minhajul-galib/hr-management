@@ -13,7 +13,7 @@ class ImpersonationController extends Controller
     /**
      * Start impersonating a user.
      */
-    public function start(User $user)
+    public function start(User $user, Request $request)
     {
         // 1. Security: Only Super System Admin can start impersonation
         if (!Auth::user()->hasRole('Super System Admin')) {
@@ -34,8 +34,11 @@ class ImpersonationController extends Controller
             ->causedBy(Auth::user())
             ->log("Started impersonating user: {$user->name} (ID: {$user->id})");
 
-        // 5. Login as the target user
+        // 5. Login as the target user. Regenerate the session ID on this
+        // identity switch (keeping the data, including impersonator_id, set
+        // above) so a session fixed before login can't ride along into it.
         Auth::login($user);
+        $request->session()->regenerate();
 
         return redirect()->route('dashboard')->with('success', "You are now impersonating {$user->name}");
     }
@@ -43,7 +46,7 @@ class ImpersonationController extends Controller
     /**
      * Stop impersonating and return to original admin account.
      */
-    public function stop()
+    public function stop(Request $request)
     {
         // 1. Check if we are currently impersonating
         if (!Session::has('impersonator_id')) {
@@ -65,6 +68,7 @@ class ImpersonationController extends Controller
 
         // 4. Login back as original admin
         Auth::login($originalAdmin);
+        $request->session()->regenerate();
 
         return redirect()->route('users.index')->with('success', 'Returned to Admin account.');
     }

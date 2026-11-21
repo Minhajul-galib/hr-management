@@ -40,6 +40,7 @@ class UserController extends Controller
             'email' => 'required|string|email|max:255|unique:users',
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
             'roles' => 'nullable|array',
+            'roles.*' => 'string|exists:roles,name',
             'department_id' => 'nullable|exists:departments,id',
         ]);
 
@@ -51,7 +52,7 @@ class UserController extends Controller
         ]);
 
         if ($request->has('roles')) {
-            $user->syncRoles($request->roles);
+            $user->syncRoles($this->rolesAssignableBy(auth()->user(), $request->input('roles', [])));
         }
 
         return back()->with('success', 'User created successfully.');
@@ -66,6 +67,7 @@ class UserController extends Controller
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:users,email,'.$user->id,
             'roles' => 'nullable|array',
+            'roles.*' => 'string|exists:roles,name',
             'department_id' => 'nullable|exists:departments,id',
         ]);
 
@@ -83,10 +85,37 @@ class UserController extends Controller
         }
 
         if ($request->has('roles')) {
-            $user->syncRoles($request->roles);
+            $user->syncRoles($this->rolesAssignableBy(auth()->user(), $request->input('roles', []), $user));
         }
 
         return back()->with('success', 'User updated successfully.');
+    }
+
+    /**
+     * Filter a requested role list down to what the acting user is allowed to grant.
+     *
+     * Only an existing Super System Admin may grant (or keep) the Super System
+     * Admin role on anyone. Without this, the 'manage users' permission alone
+     * — which is far more widely granted than the role itself — would let its
+     * holder hand themselves (or anyone) full super-admin rights simply by
+     * posting `roles: ["Super System Admin"]`, since Spatie's syncRoles()
+     * does not itself check the caller's own privilege level.
+     */
+    private function rolesAssignableBy(User $actor, array $roles, ?User $target = null): array
+    {
+        if ($actor->hasRole('Super System Admin')) {
+            return $roles;
+        }
+
+        $roles = array_values(array_filter($roles, fn ($role) => $role !== 'Super System Admin'));
+
+        // Also refuse to silently strip the role from a target who already
+        // holds it — a non-super-admin has no business touching it either way.
+        if ($target && $target->hasRole('Super System Admin')) {
+            $roles[] = 'Super System Admin';
+        }
+
+        return array_values(array_unique($roles));
     }
 
     /**
