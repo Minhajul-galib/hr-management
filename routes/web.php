@@ -50,14 +50,18 @@ Route::middleware('auth')->group(function () {
     Route::patch('/calendar/events/{event}', [CalendarController::class, 'update'])->name('calendar.events.update');
     Route::delete('/calendar/events/{event}', [CalendarController::class, 'destroy'])->name('calendar.events.destroy');
 
-    Route::middleware('permission:manage holidays')->prefix('calendar/holidays')->name('calendar.holidays.')->group(function () {
-        Route::get('/setup', [HolidayController::class, 'index'])->name('setup');
-        Route::get('/template', [HolidayController::class, 'template'])->name('template');
-        Route::post('/', [HolidayController::class, 'store'])->name('store');
-        Route::post('/settings', [HolidayController::class, 'updateSettings'])->name('settings.update');
-        Route::post('/import', [HolidayController::class, 'import'])->name('import');
-        Route::put('/{holiday}', [HolidayController::class, 'update'])->whereNumber('holiday')->name('update');
-        Route::delete('/{holiday}', [HolidayController::class, 'destroy'])->whereNumber('holiday')->name('destroy');
+    // Holidays: each action has its own permission; `manage holidays` is full access.
+    Route::prefix('calendar/holidays')->name('calendar.holidays.')->group(function () {
+        $can = fn (string $action) => 'permission:'.implode('|', MasterDataRegistry::allowing(MasterDataRegistry::HOLIDAYS, $action));
+
+        Route::get('/setup', [HolidayController::class, 'index'])
+            ->middleware('permission:'.implode('|', MasterDataRegistry::holidayPermissionNames()))->name('setup');
+        Route::get('/template', [HolidayController::class, 'template'])->middleware($can('import'))->name('template');
+        Route::post('/', [HolidayController::class, 'store'])->middleware($can('create'))->name('store');
+        Route::post('/settings', [HolidayController::class, 'updateSettings'])->middleware($can('edit'))->name('settings.update');
+        Route::post('/import', [HolidayController::class, 'import'])->middleware($can('import'))->name('import');
+        Route::put('/{holiday}', [HolidayController::class, 'update'])->middleware($can('edit'))->whereNumber('holiday')->name('update');
+        Route::delete('/{holiday}', [HolidayController::class, 'destroy'])->middleware($can('delete'))->whereNumber('holiday')->name('destroy');
     });
 
     Route::prefix('impersonate')->name('impersonate.')->group(function () {
@@ -143,37 +147,35 @@ Route::middleware('auth')->group(function () {
         Route::get('/notification-settings', [\App\Http\Controllers\NotificationController::class, 'index'])->name('notification-settings.index');
     });
 
-    // HR master data (departments, designations, grades, ...). Each master gets its
-    // own routes/permissions, e.g. `designations.index` guarded by `view designations`
-    // or `manage designations`; see App\Support\MasterData\MasterDataRegistry.
+    // HR master data (departments, designations, grades, ...). Each master gets its own
+    // routes and permissions: `designations.store` needs `create designations` or full
+    // access (`manage designations`), and so on; see App\Support\MasterData\MasterDataRegistry.
     foreach (MasterDataRegistry::all() as $key => $master) {
         $permission = $master['permission'];
+        // "permission:a|b" lets through anyone holding either: the action's own permission or full access.
+        $can = fn (string $action) => 'permission:'.implode('|', MasterDataRegistry::allowing($permission, $action));
 
-        Route::prefix("master-data/{$key}")->name("{$key}.")->group(function () use ($key, $permission, $master) {
+        Route::prefix("master-data/{$key}")->name("{$key}.")->group(function () use ($key, $master, $can) {
+            // Any permission on the master opens its screen; the page then shows only what the role may do.
             Route::get('/', [MasterDataController::class, 'index'])
                 ->defaults('type', $key)
-                ->middleware("permission:view {$permission}|manage {$permission}")
+                ->middleware('permission:'.implode('|', MasterDataRegistry::opening($master)))
                 ->name('index');
 
+            Route::post('/', [MasterDataController::class, 'store'])->defaults('type', $key)->middleware($can('create'))->name('store');
+            Route::put('/{id}', [MasterDataController::class, 'update'])->defaults('type', $key)->middleware($can('edit'))->whereNumber('id')->name('update');
+            Route::delete('/{id}', [MasterDataController::class, 'destroy'])->defaults('type', $key)->middleware($can('delete'))->whereNumber('id')->name('destroy');
+
             if (isset($master['import'])) {
-                Route::get('/export', [MasterDataController::class, 'export'])
-                    ->defaults('type', $key)
-                    ->middleware("permission:view {$permission}|manage {$permission}")
-                    ->name('export');
-            }
+                Route::get('/export', [MasterDataController::class, 'export'])->defaults('type', $key)->middleware($can('export'))->name('export');
 
-            Route::middleware("permission:manage {$permission}")->group(function () use ($key, $master) {
-                Route::post('/', [MasterDataController::class, 'store'])->defaults('type', $key)->name('store');
-                Route::put('/{id}', [MasterDataController::class, 'update'])->defaults('type', $key)->whereNumber('id')->name('update');
-                Route::delete('/{id}', [MasterDataController::class, 'destroy'])->defaults('type', $key)->whereNumber('id')->name('destroy');
-
-                if (isset($master['import'])) {
+                Route::middleware($can('import'))->group(function () use ($key) {
                     Route::get('/template', [MasterDataController::class, 'template'])->defaults('type', $key)->name('template');
                     Route::post('/import', [MasterDataController::class, 'import'])->defaults('type', $key)->name('import');
                     Route::post('/import/preview', [MasterDataController::class, 'preview'])->defaults('type', $key)->name('import.preview');
                     Route::post('/import/check', [MasterDataController::class, 'check'])->defaults('type', $key)->name('import.check');
-                }
-            });
+                });
+            }
         });
     }
 

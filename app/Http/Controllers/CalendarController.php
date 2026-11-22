@@ -11,6 +11,7 @@ use Inertia\Inertia;
 use App\Notifications\CalendarReminderNotification;
 use App\Services\NotificationService;
 use App\Support\HtmlSanitizer;
+use App\Support\MasterData\MasterDataRegistry;
 
 class CalendarController extends Controller
 {
@@ -77,7 +78,7 @@ class CalendarController extends Controller
         // Holidays belong to whoever manages holidays, not to whoever typed them in
         // (the old check named a "Super Admin" role that doesn't exist, so nobody could edit one).
         if ($event->is_holiday) {
-            abort_unless(auth()->user()->can('manage holidays'), 403, 'Only holiday managers can edit holidays');
+            abort_unless(auth()->user()->canAny(MasterDataRegistry::allowing(MasterDataRegistry::HOLIDAYS, 'edit')), 403, 'You do not have permission to edit holidays');
         } elseif ($event->user_id !== auth()->id()) {
             abort(403);
         }
@@ -101,7 +102,7 @@ class CalendarController extends Controller
     public function destroy(CalendarEvent $event)
     {
         $mayDelete = $event->is_holiday
-            ? auth()->user()->can('manage holidays')
+            ? auth()->user()->canAny(MasterDataRegistry::allowing(MasterDataRegistry::HOLIDAYS, 'delete'))
             : $event->user_id === auth()->id();
 
         abort_unless($mayDelete, 403);

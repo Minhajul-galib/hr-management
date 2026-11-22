@@ -8,6 +8,7 @@ use App\Models\HolidaySetting;
 use App\Support\Holidays\HolidayCalendar;
 use App\Support\Holidays\HolidayImporter;
 use App\Support\Holidays\SpreadsheetRows;
+use App\Support\MasterData\MasterDataRegistry;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,7 +20,8 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * Holidays Setup: the list of public holidays, the weekly off days, and the
- * Excel import. Every route here is behind the "manage holidays" permission.
+ * Excel import. Each route has its own permission (`view`, `create`, `edit`,
+ * `delete` or `import` holidays); `manage holidays` is full access. See routes/web.php.
  */
 class HolidayController extends Controller
 {
@@ -51,7 +53,11 @@ class HolidayController extends Controller
             // Flashed by import(); only present on the request right after an upload.
             'importResult' => session('import_result'),
             'limits' => ['max_rows' => HolidayImporter::MAX_ROWS, 'max_mb' => self::MAX_UPLOAD_KB / 1024],
-            'canManage' => true,
+            // What this person may do here, so the page shows only those buttons.
+            'can' => collect(['create', 'edit', 'delete', 'import'])
+                ->mapWithKeys(fn (string $action) => [
+                    $action => $request->user()->canAny(MasterDataRegistry::allowing(MasterDataRegistry::HOLIDAYS, $action)),
+                ])->all(),
         ]);
     }
 

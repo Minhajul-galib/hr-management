@@ -25,7 +25,8 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  * One controller for every HR master (designations, grades, leave types, ...).
  * What each master looks like is described in MasterDataRegistry; routes are
  * registered per master in routes/web.php so each keeps its own name and
- * permissions (`view <master>` / `manage <master>`).
+ * permissions (`view`, `create`, `edit`, `delete`, `import`, `export` or full
+ * access `manage`, each followed by the master's name).
  *
  * Small masters send every row and the page filters them in the browser.
  * Masters marked `paginate` (departments) are searched and paged here instead,
@@ -49,12 +50,13 @@ class MasterDataController extends Controller
     {
         $type = $this->type($request);
         $definition = $this->definition($type);
-        $this->authorizeFor($definition, ['view', 'manage']);
+        abort_unless(auth()->user()?->canAny(MasterDataRegistry::opening($definition)), 403);
 
         $props = [
             'definition' => $this->publicDefinition($type, $definition),
             'lookups' => $this->lookups($definition),
-            'canManage' => auth()->user()->can('manage '.$definition['permission']),
+            // What this person may do here, so the page shows only those buttons.
+            'can' => $this->abilities($definition),
             // Flashed by import(); only present on the request right after an upload.
             'importResult' => session('import_result'),
             'importLimits' => isset($definition['import'])
@@ -104,7 +106,7 @@ class MasterDataController extends Controller
     {
         $type = $this->type($request);
         $definition = $this->definition($type);
-        $this->authorizeFor($definition, ['manage']);
+        $this->authorizeFor($definition, 'create');
 
         $data = $this->validated($request, $definition, null);
         DB::transaction(fn () => $this->persist($definition, new $definition['model'], $data));
@@ -117,7 +119,7 @@ class MasterDataController extends Controller
     {
         $type = $this->type($request);
         $definition = $this->definition($type);
-        $this->authorizeFor($definition, ['manage']);
+        $this->authorizeFor($definition, 'edit');
 
         $model = $definition['model']::findOrFail($id);
         $data = $this->validated($request, $definition, $model->getKey());
@@ -131,7 +133,7 @@ class MasterDataController extends Controller
     {
         $type = $this->type($request);
         $definition = $this->definition($type);
-        $this->authorizeFor($definition, ['manage']);
+        $this->authorizeFor($definition, 'delete');
 
         $model = $definition['model']::findOrFail($id);
 
@@ -156,7 +158,7 @@ class MasterDataController extends Controller
     {
         $type = $this->type($request);
         $definition = $this->importable($type);
-        $this->authorizeFor($definition, ['manage']);
+        $this->authorizeFor($definition, 'import');
 
         $this->validateUpload($request);
         $file = $request->file('file');
@@ -178,7 +180,7 @@ class MasterDataController extends Controller
     {
         $type = $this->type($request);
         $definition = $this->importable($type);
-        $this->authorizeFor($definition, ['manage']);
+        $this->authorizeFor($definition, 'import');
 
         return response()->json((new MasterDataImporter($definition))->check($this->submittedRows($request)));
     }
@@ -192,7 +194,7 @@ class MasterDataController extends Controller
     {
         $type = $this->type($request);
         $definition = $this->importable($type);
-        $this->authorizeFor($definition, ['manage']);
+        $this->authorizeFor($definition, 'import');
 
         $back = redirect()->route("{$type}.index", $this->listParams($request));
         $importer = new MasterDataImporter($definition);
@@ -253,7 +255,7 @@ class MasterDataController extends Controller
     {
         $type = $this->type($request);
         $definition = $this->importable($type);
-        $this->authorizeFor($definition, ['manage']);
+        $this->authorizeFor($definition, 'import');
 
         return (new MasterDataExport($definition, template: true))->download("{$type}-import-template.xlsx");
     }
@@ -263,7 +265,7 @@ class MasterDataController extends Controller
     {
         $type = $this->type($request);
         $definition = $this->importable($type);
-        $this->authorizeFor($definition, ['view', 'manage']);
+        $this->authorizeFor($definition, 'export');
 
         $records = $this->filtered($this->listQuery($definition), $definition, $this->filters($request, $definition))->get();
 
@@ -413,12 +415,30 @@ class MasterDataController extends Controller
         );
     }
 
-    /** @param list<string> $abilities  any one of these ("view", "manage") is enough */
-    private function authorizeFor(array $definition, array $abilities): void
+    /** Abort unless the user holds this action's permission or full access (`manage`). */
+    private function authorizeFor(array $definition, string $action): void
     {
-        $permissions = array_map(fn (string $a) => "{$a} {$definition['permission']}", $abilities);
+        abort_unless(auth()->user()?->canAny(MasterDataRegistry::allowing($definition['permission'], $action)), 403);
+    }
 
-        abort_unless(auth()->user()?->canAny($permissions), 403);
+    /**
+     * What the user may do on this master, by action. The page reads it to decide
+     * which buttons to show; the routes enforce the same permissions.
+     *
+     * @return array<string, bool>
+     */
+    private function abilities(array $definition): array
+    {
+        $user = auth()->user();
+        $excel = isset($definition['import']);
+
+        return [
+            'create' => $user->canAny(MasterDataRegistry::allowing($definition['permission'], 'create')),
+            'edit' => $user->canAny(MasterDataRegistry::allowing($definition['permission'], 'edit')),
+            'delete' => $user->canAny(MasterDataRegistry::allowing($definition['permission'], 'delete')),
+            'import' => $excel && $user->canAny(MasterDataRegistry::allowing($definition['permission'], 'import')),
+            'export' => $excel && $user->canAny(MasterDataRegistry::allowing($definition['permission'], 'export')),
+        ];
     }
 
     /** @return array<string, mixed> */

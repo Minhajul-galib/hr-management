@@ -66,7 +66,7 @@ class RolePermissionSeeder extends Seeder
         ];
 
         // পারমিশনগুলো ডাটাবেসে সেভ করা
-        foreach (array_merge($permissions, $workflowPermissions, MasterDataRegistry::permissionNames()) as $permission) {
+        foreach (array_merge($permissions, $workflowPermissions, MasterDataRegistry::allPermissionNames()) as $permission) {
             Permission::findOrCreate($permission);
         }
 

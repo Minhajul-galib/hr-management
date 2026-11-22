@@ -101,7 +101,7 @@ class MasterDataTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('MasterData/Index')
                 ->where('definition.key', 'designations')
-                ->where('canManage', false)
+                ->where('can', ['create' => false, 'edit' => false, 'delete' => false, 'import' => false, 'export' => false])
                 ->has('records', 1));
 
         $this->actingAs($viewer)->post(route('designations.store'), ['code' => '999', 'title' => 'X', 'serial' => 1])->assertForbidden();

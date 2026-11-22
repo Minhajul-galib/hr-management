@@ -101,16 +101,72 @@ final class MasterDataRegistry
         return array_keys(self::all());
     }
 
+    /**
+     * What a role can be allowed to do on a master. `manage` is full access and
+     * stands in for every one of these; the rest are ticked one by one in the
+     * role matrix. Import and export exist only on masters with Excel support.
+     */
+    public const ACTIONS = ['view', 'create', 'edit', 'delete', 'import', 'export'];
+
+    /** Holidays have their own screen, not a registry entry, but the same permissions. */
+    public const HOLIDAYS = 'holidays';
+
+    /**
+     * Permission names for one master, `manage` last.
+     *
+     * @param  list<string>  $without  actions the master does not have
+     * @return list<string>
+     */
+    public static function permissionsOf(string $permission, array $without = []): array
+    {
+        $actions = array_diff(self::ACTIONS, $without);
+
+        return [...array_map(fn (string $action) => "{$action} {$permission}", $actions), "manage {$permission}"];
+    }
+
+    /**
+     * The permissions that let someone do $action on a master: its own, or full
+     * access. Route middleware and controllers both use this, so they agree.
+     *
+     * @return list<string>
+     */
+    public static function allowing(string $permission, string $action): array
+    {
+        return ["{$action} {$permission}", "manage {$permission}"];
+    }
+
+    /**
+     * Any permission on the master at all: enough to open its screen.
+     *
+     * @param  array<string, mixed>  $definition
+     * @return list<string>
+     */
+    public static function opening(array $definition): array
+    {
+        return self::permissionsOf($definition['permission'], isset($definition['import']) ? [] : ['import', 'export']);
+    }
+
     /** @return list<string> */
     public static function permissionNames(): array
     {
         $names = [];
         foreach (self::all() as $definition) {
-            $names[] = 'view '.$definition['permission'];
-            $names[] = 'manage '.$definition['permission'];
+            array_push($names, ...self::opening($definition));
         }
 
         return $names;
+    }
+
+    /** Holidays can be imported from Excel but not exported. @return list<string> */
+    public static function holidayPermissionNames(): array
+    {
+        return self::permissionsOf(self::HOLIDAYS, without: ['export']);
+    }
+
+    /** Every master-data permission, the registry's and Holidays'. @return list<string> */
+    public static function allPermissionNames(): array
+    {
+        return [...self::permissionNames(), ...self::holidayPermissionNames()];
     }
 
     /** @return list<string> */

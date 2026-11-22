@@ -142,7 +142,7 @@ class EditorRoleTest extends TestCase
         foreach (MasterDataRegistry::keys() as $key) {
             $this->actingAs($editor)->get(route("{$key}.index"))
                 ->assertOk()
-                ->assertInertia(fn (Assert $page) => $page->where('canManage', true));
+                ->assertInertia(fn (Assert $page) => $page->where('can.create', true)->where('can.edit', true)->where('can.delete', true));
         }
         $this->actingAs($editor)->get(route('units.index'))->assertOk();
     }
@@ -275,14 +275,14 @@ class EditorRoleTest extends TestCase
             ->assertOk()
             ->assertInertia(function (Assert $page) {
                 $page->component('SuperAdmin/Roles/Index')
-                    ->has('masterData', count(MasterDataRegistry::keys()))
+                    ->has('masterData', count(MasterDataRegistry::keys()) + 2) // + Units and Holidays
                     ->where('masterData.0.label', 'Departments')
-                    ->where('masterData.0.view', 'view departments')
+                    ->where('masterData.0.actions.0.permission', 'view departments')
                     ->where('masterData.0.manage', 'manage departments');
             });
 
         // Every checkbox in the matrix maps to a permission that exists, or ticking it would fail.
-        foreach (MasterDataRegistry::permissionNames() as $permission) {
+        foreach (MasterDataRegistry::allPermissionNames() as $permission) {
             $this->assertTrue(Permission::where('name', $permission)->exists(), "missing {$permission}");
         }
     }
@@ -300,6 +300,6 @@ class EditorRoleTest extends TestCase
         ])->assertSessionHasNoErrors();
 
         $this->actingAs($topUser)->get(route('designations.index'))->assertOk()
-            ->assertInertia(fn (Assert $page) => $page->where('canManage', false));
+            ->assertInertia(fn (Assert $page) => $page->where('can.create', false)->where('can.edit', false)->where('can.delete', false));
     }
 }

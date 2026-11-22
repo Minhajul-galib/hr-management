@@ -27,7 +27,8 @@ const props = defineProps({
     definition: { type: Object, required: true },
     records: { type: Array, default: () => [] },
     lookups: { type: Object, default: () => ({}) },
-    canManage: { type: Boolean, default: false },
+    // What this person may do here: { create, edit, delete, import, export }.
+    can: { type: Object, default: () => ({}) },
     // Server-paged masters only.
     pagination: { type: Object, default: null },
     query: { type: Object, default: () => ({}) },
@@ -170,6 +171,9 @@ watch(statusFilter, (value) => {
 
 const goToPage = (page) => reload({ page });
 const changePerPage = (perPage) => reload({ per_page: perPage, page: 1 });
+
+// The Actions column (edit / delete) is only there when the role may do either.
+const hasActions = computed(() => !!(props.can.edit || props.can.delete));
 
 // Export what the list shows: same search and status, every page.
 const exportUrl = computed(() => {
@@ -358,7 +362,7 @@ watch(
                 </div>
                 <div class="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
                     <a
-                        v-if="definition.import"
+                        v-if="definition.import && can.export"
                         :href="exportUrl"
                         class="inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-widest text-gray-700 shadow-sm transition duration-150 ease-in-out hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                         :title="`Download ${serverMode && (query.search || query.status) ? 'the filtered' : 'the full'} list as Excel`"
@@ -366,11 +370,11 @@ watch(
                         <Download :size="16" class="mr-1.5" />
                         Export
                     </a>
-                    <SecondaryButton v-if="definition.import && canManage" type="button" @click="showImport = true">
+                    <SecondaryButton v-if="definition.import && can.import" type="button" @click="showImport = true">
                         <FileSpreadsheet :size="16" class="mr-1.5" />
                         Import Excel
                     </SecondaryButton>
-                    <PrimaryButton v-if="canManage" type="button" @click="openCreate">
+                    <PrimaryButton v-if="can.create" type="button" @click="openCreate">
                         <Plus :size="16" class="mr-1.5" />
                         Add {{ definition.singular }}
                     </PrimaryButton>
@@ -476,7 +480,7 @@ watch(
                                         >
                                             {{ col.label }}
                                         </th>
-                                        <th v-if="canManage" class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                        <th v-if="hasActions" class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                             Actions
                                         </th>
                                     </tr>
@@ -540,9 +544,10 @@ watch(
                                             <template v-else>{{ record[col.key] || '—' }}</template>
                                         </td>
 
-                                        <td v-if="canManage" class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                        <td v-if="hasActions" class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                             <div class="flex justify-end gap-3">
                                                 <button
+                                                    v-if="can.edit"
                                                     type="button"
                                                     @click="openEdit(record)"
                                                     class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300"
@@ -551,6 +556,7 @@ watch(
                                                     <Pencil :size="16" />
                                                 </button>
                                                 <button
+                                                    v-if="can.delete"
                                                     type="button"
                                                     @click="remove(record)"
                                                     class="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300"
@@ -563,7 +569,7 @@ watch(
                                     </tr>
 
                                     <tr v-if="filteredRecords.length === 0">
-                                        <td :colspan="definition.columns.length + (canManage ? 1 : 0)" class="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                                        <td :colspan="definition.columns.length + (hasActions ? 1 : 0)" class="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
                                             {{
                                                 (serverMode ? stats?.total === 0 : records.length === 0)
                                                     ? `No ${definition.label.toLowerCase()} yet.`
@@ -589,7 +595,7 @@ watch(
         </div>
 
         <ImportDialog
-            v-if="definition.import && canManage && importLimits"
+            v-if="definition.import && can.import && importLimits"
             :show="showImport"
             :title="`Import ${definition.label.toLowerCase()} from Excel`"
             :preview-url="route(`${definition.key}.import.preview`)"

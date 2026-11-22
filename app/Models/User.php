@@ -29,6 +29,7 @@ class User extends Authenticatable
         'password',
         'unit_id',
         'department_id',
+        'designation_id',
     ];
 
     /**
@@ -64,6 +65,12 @@ class User extends Authenticatable
     public function department(): BelongsTo
     {
         return $this->belongsTo(Department::class, 'department_id');
+    }
+
+    // Designation chosen at registration (master data)
+    public function designation(): BelongsTo
+    {
+        return $this->belongsTo(Designation::class, 'designation_id');
     }
 
     // ----- Clifto Talk -----

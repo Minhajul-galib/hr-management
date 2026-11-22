@@ -89,7 +89,7 @@ class RoleController extends Controller
             'dashboard view recent activities',
             'dashboard view total documents',
         ];
-        foreach (array_merge($basePermissions, MasterDataRegistry::permissionNames()) as $perm) {
+        foreach (array_merge($basePermissions, MasterDataRegistry::allPermissionNames()) as $perm) {
             Permission::firstOrCreate(['name' => $perm]);
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();
@@ -106,12 +106,42 @@ class RoleController extends Controller
             'permissions' => Permission::all(),
             // Every master-data screen, for the permission matrix. Built from the
             // registry so a new master shows up there without touching the page.
-            'masterData' => collect(MasterDataRegistry::all())->map(fn (array $master) => [
-                'label' => $master['label'],
-                'view' => 'view '.$master['permission'],
-                'manage' => 'manage '.$master['permission'],
-            ])->values(),
+            'masterData' => $this->masterDataMatrix(),
         ]);
+    }
+
+    /**
+     * One entry per master-data screen, in the sidebar's order (Departments, Units,
+     * the rest, Holidays): the permission behind each of its actions, and `manage`,
+     * the full-access permission that stands in for all of them.
+     *
+     * @return list<array{label: string, actions: list<array{action: string, permission: string, label?: string}>, manage: string}>
+     */
+    private function masterDataMatrix(): array
+    {
+        $registry = collect(MasterDataRegistry::all())->map(fn (array $master) => [
+            'label' => $master['label'],
+            'permission' => $master['permission'],
+            'without' => isset($master['import']) ? [] : ['import', 'export'],
+        ])->values();
+
+        // Units and Holidays predate the registry (own screens) but use the same permissions.
+        // A unit's Excel import is part of adding units, so it has no permission of its own.
+        $units = ['label' => 'Units', 'permission' => 'units', 'without' => ['import', 'export'], 'labels' => ['create' => 'Add (includes Excel import)']];
+        $holidays = ['label' => 'Holidays', 'permission' => MasterDataRegistry::HOLIDAYS, 'without' => ['export']];
+
+        return collect([$registry->first(), $units, ...$registry->slice(1), $holidays])
+            ->filter()
+            ->map(fn (array $master) => [
+                'label' => $master['label'],
+                'actions' => collect(array_diff(MasterDataRegistry::ACTIONS, $master['without']))
+                    ->map(fn (string $action) => array_filter([
+                        'action' => $action,
+                        'permission' => "{$action} {$master['permission']}",
+                        'label' => $master['labels'][$action] ?? null,
+                    ]))->values()->all(),
+                'manage' => "manage {$master['permission']}",
+            ])->values()->all();
     }
 
     /**

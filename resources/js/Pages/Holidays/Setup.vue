@@ -41,7 +41,8 @@ const props = defineProps({
     settings: { type: Object, default: () => ({ weekday_off: [] }) },
     importResult: { type: Object, default: null },
     limits: { type: Object, default: () => ({ max_rows: 1000, max_mb: 5 }) },
-    canManage: { type: Boolean, default: false },
+    // What this person may do: { create, edit, delete, import }.
+    can: { type: Object, default: () => ({}) },
 });
 
 const MIN_YEAR = 2000;
@@ -387,19 +388,20 @@ const more = (total, shown) => Math.max(0, total - shown.length);
                     </p>
                 </div>
 
-                <div v-if="canManage" class="flex flex-wrap items-center gap-2">
+                <div v-if="can.import || can.create" class="flex flex-wrap items-center gap-2">
                     <a
+                        v-if="can.import"
                         :href="route('calendar.holidays.template')"
                         class="inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-widest text-gray-700 shadow-sm transition duration-150 ease-in-out hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                     >
                         <Download :size="16" class="mr-1.5" />
                         Template
                     </a>
-                    <SecondaryButton type="button" @click="openImport">
+                    <SecondaryButton v-if="can.import" type="button" @click="openImport">
                         <FileSpreadsheet :size="16" class="mr-1.5" />
                         Import Excel
                     </SecondaryButton>
-                    <PrimaryButton type="button" @click="openCreate">
+                    <PrimaryButton v-if="can.create" type="button" @click="openCreate">
                         <Plus :size="16" class="mr-1.5" />
                         Add Holiday
                     </PrimaryButton>
@@ -409,11 +411,6 @@ const more = (total, shown) => Math.max(0, total - shown.length);
 
         <div class="py-8">
             <div class="mx-auto max-w-7xl space-y-6 sm:px-4 lg:px-4 xl:max-w-[1440px] 2xl:max-w-[1600px]">
-                <div v-if="!canManage" :class="[cardClass, 'p-6 text-red-600 dark:text-red-400']">
-                    You do not have permission to manage holidays.
-                </div>
-
-                <template v-else>
                     <!-- Result of the last import -->
                     <section
                         v-if="lastImport"
@@ -597,15 +594,15 @@ const more = (total, shown) => Math.max(0, total - shown.length);
                             <div v-if="!holidays.length" class="px-6 py-14 text-center">
                                 <CalendarOff :size="40" class="mx-auto text-gray-300 dark:text-gray-600" />
                                 <h3 class="mt-3 font-medium text-gray-900 dark:text-gray-100">No holidays in {{ year }} yet</h3>
-                                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                                <p v-if="can.create || can.import" class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                                     Add them one by one, or upload a whole year from an Excel file.
                                 </p>
-                                <div class="mt-5 flex flex-wrap justify-center gap-2">
-                                    <PrimaryButton type="button" @click="openCreate">
+                                <div v-if="can.create || can.import" class="mt-5 flex flex-wrap justify-center gap-2">
+                                    <PrimaryButton v-if="can.create" type="button" @click="openCreate">
                                         <Plus :size="16" class="mr-1.5" />
                                         Add Holiday
                                     </PrimaryButton>
-                                    <SecondaryButton type="button" @click="openImport">
+                                    <SecondaryButton v-if="can.import" type="button" @click="openImport">
                                         <FileSpreadsheet :size="16" class="mr-1.5" />
                                         Import Excel
                                     </SecondaryButton>
@@ -665,6 +662,7 @@ const more = (total, shown) => Math.max(0, total - shown.length);
                                                     {{ TIMING_BADGE[timing(holiday)].label }}
                                                 </span>
                                                 <button
+                                                    v-if="can.edit"
                                                     type="button"
                                                     class="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300"
                                                     :title="`Edit ${holiday.title}`"
@@ -674,6 +672,7 @@ const more = (total, shown) => Math.max(0, total - shown.length);
                                                     <Pencil :size="16" />
                                                 </button>
                                                 <button
+                                                    v-if="can.delete"
                                                     type="button"
                                                     class="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
                                                     :title="`Delete ${holiday.title}`"
@@ -707,8 +706,9 @@ const more = (total, shown) => Math.max(0, total - shown.length);
                                         type="button"
                                         :aria-pressed="isOff(day.value)"
                                         :title="day.long"
+                                        :disabled="!can.edit"
                                         :class="[
-                                            'rounded-md border py-2 text-xs font-semibold transition-colors',
+                                            'rounded-md border py-2 text-xs font-semibold transition-colors disabled:cursor-default',
                                             isOff(day.value)
                                                 ? 'border-indigo-600 bg-indigo-600 text-white'
                                                 : 'border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700',
@@ -719,7 +719,7 @@ const more = (total, shown) => Math.max(0, total - shown.length);
                                     </button>
                                 </div>
 
-                                <div class="mt-3 flex flex-wrap gap-x-3 text-xs">
+                                <div v-if="can.edit" class="mt-3 flex flex-wrap gap-x-3 text-xs">
                                     <button type="button" class="text-indigo-600 hover:underline dark:text-indigo-400" @click="setOffDays([5])">Friday only</button>
                                     <button type="button" class="text-indigo-600 hover:underline dark:text-indigo-400" @click="setOffDays([5, 6])">Friday &amp; Saturday</button>
                                     <button type="button" class="text-indigo-600 hover:underline dark:text-indigo-400" @click="setOffDays([6, 0])">Saturday &amp; Sunday</button>
@@ -729,7 +729,7 @@ const more = (total, shown) => Math.max(0, total - shown.length);
                                 <p class="mt-3 text-sm text-gray-700 dark:text-gray-300">{{ offSummary }}</p>
                                 <InputError class="mt-2" :message="weekly.errors.weekday_off" />
 
-                                <div class="mt-4 flex items-center gap-3">
+                                <div v-if="can.edit" class="mt-4 flex items-center gap-3">
                                     <PrimaryButton type="button" :disabled="!weekly.isDirty || weekly.processing" @click="saveWeekly">
                                         Save
                                     </PrimaryButton>
@@ -737,7 +737,7 @@ const more = (total, shown) => Math.max(0, total - shown.length);
                                 </div>
                             </section>
 
-                            <section :class="[cardClass, 'p-5']">
+                            <section v-if="can.import" :class="[cardClass, 'p-5']">
                                 <h3 class="flex items-center gap-2 font-semibold text-gray-900 dark:text-gray-100">
                                     <FileSpreadsheet :size="18" class="text-gray-400" />
                                     Bulk import from Excel
@@ -763,7 +763,6 @@ const more = (total, shown) => Math.max(0, total - shown.length);
                             </section>
                         </div>
                     </div>
-                </template>
             </div>
         </div>
 

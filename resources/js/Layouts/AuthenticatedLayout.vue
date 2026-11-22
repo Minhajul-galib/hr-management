@@ -177,6 +177,11 @@ onMounted(() => {
     }
 });
 
+// Any permission on a master opens its screen (the page shows only what the role may do),
+// so its menu item appears for any of them. `manage` is full access.
+const anyOn = (master, actions = ['view', 'create', 'edit', 'delete', 'import', 'export']) =>
+    [...actions, 'manage'].map((action) => `${action} ${master}`);
+
 // Define the menu structure with groups
 const menuGroups = [
     {
@@ -202,16 +207,16 @@ const menuGroups = [
     {
         name: 'Master Data',
         items: [
-            { name: 'Departments', routeName: 'departments.index', permission: ['view departments', 'manage departments'], icon: Building },
-            { name: 'Units', routeName: 'units.index', permission: ['manage units', 'view units'], icon: Package },
-            { name: 'Designations', routeName: 'designations.index', permission: ['view designations', 'manage designations'], icon: Briefcase },
-            { name: 'Salary Types', routeName: 'salary-types.index', permission: ['view salary types', 'manage salary types'], icon: Percent },
-            { name: 'Grades & Pay Scales', routeName: 'grades.index', permission: ['view grades', 'manage grades'], icon: Layers },
-            { name: 'Leave Types', routeName: 'leave-types.index', permission: ['view leave types', 'manage leave types'], icon: CalendarOff },
-            { name: 'Offence Types', routeName: 'offence-types.index', permission: ['view offence types', 'manage offence types'], icon: ShieldAlert },
-            { name: 'ACR Templates', routeName: 'acr-templates.index', permission: ['view acr templates', 'manage acr templates'], icon: ClipboardList },
-            { name: 'Document Types', routeName: 'document-types.index', permission: ['view document types', 'manage document types'], icon: FileText },
-            { name: 'Holidays', routeName: 'calendar.holidays.setup', permission: 'manage holidays', icon: CalendarDays },
+            { name: 'Departments', routeName: 'departments.index', permission: anyOn('departments'), icon: Building },
+            { name: 'Units', routeName: 'units.index', permission: anyOn('units', ['view', 'create', 'edit', 'delete']), icon: Package },
+            { name: 'Designations', routeName: 'designations.index', permission: anyOn('designations'), icon: Briefcase },
+            { name: 'Salary Types', routeName: 'salary-types.index', permission: anyOn('salary types'), icon: Percent },
+            { name: 'Grades & Pay Scales', routeName: 'grades.index', permission: anyOn('grades'), icon: Layers },
+            { name: 'Leave Types', routeName: 'leave-types.index', permission: anyOn('leave types'), icon: CalendarOff },
+            { name: 'Offence Types', routeName: 'offence-types.index', permission: anyOn('offence types'), icon: ShieldAlert },
+            { name: 'ACR Templates', routeName: 'acr-templates.index', permission: anyOn('acr templates'), icon: ClipboardList },
+            { name: 'Document Types', routeName: 'document-types.index', permission: anyOn('document types'), icon: FileText },
+            { name: 'Holidays', routeName: 'calendar.holidays.setup', permission: anyOn('holidays', ['view', 'create', 'edit', 'delete', 'import']), icon: CalendarDays },
         ]
     },
     {

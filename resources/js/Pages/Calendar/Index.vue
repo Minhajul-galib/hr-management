@@ -87,7 +87,13 @@ let calendar = null;
 const page = usePage();
 const userPermissions = computed(() => page.props.auth?.permissions || []);
 const userRoles = computed(() => page.props.auth?.roles || []);
-const canManageHolidays = computed(() => userPermissions.value.includes('manage holidays') || userRoles.value.includes('Super System Admin'));
+// Holidays have per-action permissions; `manage holidays` is full access.
+const mayDoWithHolidays = (...actions) => userRoles.value.includes('Super System Admin')
+    || ['manage', ...actions].some((action) => userPermissions.value.includes(`${action} holidays`));
+// Opens Holidays Setup: any holiday permission will do (the page then shows what the role may do).
+const canOpenHolidaySetup = computed(() => mayDoWithHolidays('view', 'create', 'edit', 'delete', 'import'));
+// Ticks "Mark as Holiday" on a new event.
+const canAddHolidays = computed(() => mayDoWithHolidays('create'));
 
 // Event form data
 const eventForm = ref({
@@ -311,7 +317,7 @@ function saveEvent() {
             }
         });
     } else {
-        const isHolidayCreate = canManageHolidays.value && eventForm.value.is_holiday;
+        const isHolidayCreate = canAddHolidays.value && eventForm.value.is_holiday;
         const url = isHolidayCreate ? route('calendar.holidays.store') : '/calendar/events';
         router.post(url, eventForm.value, {
             preserveScroll: true,
@@ -505,7 +511,7 @@ watch(() => props.events, (newEvents) => {
                         Add Event
                     </button>
                     <button
-                        v-if="canManageHolidays"
+                        v-if="canOpenHolidaySetup"
                         @click="router.visit(route('calendar.holidays.setup'))"
                         class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-2"
                     >
@@ -701,7 +707,7 @@ watch(() => props.events, (newEvents) => {
                             <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">All Day</span>
                         </label>
 
-                        <label v-if="canManageHolidays" class="flex items-center">
+                        <label v-if="canAddHolidays" class="flex items-center">
                             <input
                                 v-model="eventForm.is_holiday"
                                 type="checkbox"

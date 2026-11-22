@@ -14,6 +14,21 @@ class DashboardController extends Controller
         $isSuperAdmin = $user->hasRole('Super System Admin');
         $isImpersonating = $request->session()->has('impersonator_id');
 
+        // A new registrant is an Applicant with no permissions yet. Rather than a 403,
+        // they get a thank-you page. If an admin later grants the Applicant role
+        // `view dashboard`, they get the real dashboard like anyone else.
+        if (! $isSuperAdmin && $user->hasRole('Applicant') && ! $user->can('view dashboard')) {
+            $user->loadMissing('designation:id,code,title');
+
+            return Inertia::render('Dashboard/Applicant', [
+                'applicant' => [
+                    'name'        => $user->name,
+                    'email'       => $user->email,
+                    'designation' => $user->designation?->title,
+                ],
+            ]);
+        }
+
         abort_unless($isSuperAdmin || $isImpersonating || $user->can('view dashboard'), 403);
 
         $can = [

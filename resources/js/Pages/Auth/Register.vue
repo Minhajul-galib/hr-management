@@ -1,13 +1,19 @@
 <script setup>
 import InputError from '@/Components/InputError.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { User, Mail, Lock, Eye, EyeOff, Phone } from 'lucide-vue-next';
+import { User, Mail, Lock, Eye, EyeOff, Phone, Briefcase } from 'lucide-vue-next';
 import { ref } from 'vue';
+
+const props = defineProps({
+    // Active designations from the master list: [{ id, code, title }]
+    designations: { type: Array, default: () => [] },
+});
 
 const form = useForm({
     name: '',
     email: '',
     phone: '',
+    designation_id: '',
     password: '',
     password_confirmation: '',
 });
@@ -101,6 +107,26 @@ const submit = () => {
                             />
                         </div>
                         <InputError class="text-xs" :message="form.errors.phone" />
+                    </div>
+
+                    <!-- Designation Field (only when the master list has entries) -->
+                    <div v-if="props.designations.length" class="space-y-2">
+                        <label for="designation_id" class="block text-sm font-semibold text-gray-700 dark:text-gray-300">Designation</label>
+                        <div class="relative">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <Briefcase class="h-5 w-5 text-gray-400" />
+                            </div>
+                            <select
+                                id="designation_id"
+                                v-model="form.designation_id"
+                                required
+                                class="block w-full pl-10 pr-3 py-3 border border-gray-300 dark:border-gray-600 rounded-xl text-gray-900 dark:text-gray-100 dark:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                            >
+                                <option value="" disabled>Select your designation</option>
+                                <option v-for="d in props.designations" :key="d.id" :value="d.id">{{ d.title }}</option>
+                            </select>
+                        </div>
+                        <InputError class="text-xs" :message="form.errors.designation_id" />
                     </div>
 
                     <!-- Password Field -->

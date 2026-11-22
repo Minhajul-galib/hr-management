@@ -14,7 +14,7 @@ import { Pencil, Trash2 } from 'lucide-vue-next';
 const props = defineProps({
     roles: Array,
     permissions: Array,
-    // Every master-data screen: [{ label, view, manage }], from the server's registry.
+    // Every master-data screen: [{ label, actions: [{ action, permission, label? }], manage }], from the server.
     masterData: { type: Array, default: () => [] },
 });
 
@@ -107,7 +107,7 @@ const updatePermission = (role, permissionName, checked) => {
     });
 };
 
-const hasPermission = (role, permissionName) => {
+const hasPermission = (role, permissionName, impliedBy = null) => {
     if (!permissionName) return false;
     
     // Super System Admin has all permissions by default
@@ -115,8 +115,15 @@ const hasPermission = (role, permissionName) => {
         return true;
     }
     
-    return role.permissions.some(p => p.name === permissionName);
+    return role.permissions.some(p => p.name === permissionName || (impliedBy && p.name === impliedBy));
 };
+
+// A master's "Full access" row stands in for every other row of that master. They show as
+// ticked (and locked) while it is on; untick it to choose action by action.
+const isImplied = (role, feature) =>
+    role.name !== 'Super System Admin'
+    && !!feature.impliedBy
+    && role.permissions.some(p => p.name === feature.impliedBy);
 
 // Map setColor keys to Tailwind bg classes for feature set grouping
 const setColorMap = {
@@ -138,26 +145,27 @@ const getSetLabelClass = (feature) => {
 
 const isParentRow = (feature) => feature.name && !feature.name.startsWith('↳');
 
-// Master data: each screen gets a "view" row and, under it, an "add / edit / delete" row.
-// Units predate the registry and have their own finer-grained permissions.
-const masterRows = (master) => [
-    { name: master.label, permission: master.view, setColor: 'blue' },
-    { name: '↳ Add / edit / delete', permission: master.manage, setColor: 'blue' },
-];
+// Master data: each screen gets a row per thing a role can do on it (see, add, edit, delete,
+// and Excel import / export where the screen has them), then "Full access", which allows all.
+const ACTION_LABELS = {
+    create: 'Add',
+    edit: 'Edit',
+    delete: 'Delete',
+    import: 'Import from Excel',
+    export: 'Export to Excel',
+};
 
-const unitRows = [
-    { name: 'Units', permission: 'view units', setColor: 'blue' },
-    { name: '↳ Create', permission: 'create units', setColor: 'blue' },
-    { name: '↳ Edit', permission: 'edit units', setColor: 'blue' },
-    { name: '↳ Delete', permission: 'delete units', setColor: 'blue' },
-    { name: '↳ Full access (manage)', permission: 'manage units', setColor: 'blue' },
+const masterRows = (master) => [
+    ...master.actions.map(({ action, permission, label }) =>
+        action === 'view'
+            ? { name: master.label, permission, setColor: 'blue', impliedBy: master.manage }
+            : { name: `↳ ${label ?? ACTION_LABELS[action]}`, permission, setColor: 'blue', impliedBy: master.manage },
+    ),
+    { name: '↳ Full access (manage)', permission: master.manage, setColor: 'blue' },
 ];
 
 // Define system features mapping with categories
 const systemFeatures = computed(() => {
-    // Same order as the sidebar's Master Data group: Departments first, then Units, then the rest.
-    const [departments, ...others] = props.masterData.map(masterRows);
-
     return [
         { category: 'Core Modules', items: [
             { name: 'Dashboard', permission: 'view dashboard' },
@@ -169,12 +177,8 @@ const systemFeatures = computed(() => {
             { name: 'Settings', permission: 'manage settings' },
             { name: 'Documentation', permission: 'view documentation' },
         ]},
-        { category: 'Master Data', items: [
-            ...(departments ?? []),
-            ...unitRows,
-            ...others.flat(),
-            { name: 'Holidays', permission: 'manage holidays' },
-        ]},
+        // Same order as the sidebar's Master Data group.
+        { category: 'Master Data', items: props.masterData.flatMap(masterRows) },
         { category: 'HR & Finance', items: [
             { name: 'Attendance', permission: 'view attendance' },
             { name: 'Leave Requests', permission: 'view leave requests' },
@@ -251,10 +255,11 @@ const systemFeatures = computed(() => {
                                             <template v-if="feature.permission">
                                                 <input
                                                     type="checkbox"
-                                                    :checked="hasPermission(role, feature.permission)"
+                                                    :checked="hasPermission(role, feature.permission, feature.impliedBy)"
                                                     @change="(e) => updatePermission(role, feature.permission, e.target.checked)"
                                                     class="rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 text-indigo-600 shadow-sm focus:ring-indigo-500"
-                                                    :disabled="role.name === 'Super System Admin'"
+                                                    :disabled="role.name === 'Super System Admin' || isImplied(role, feature)"
+                                                    :title="isImplied(role, feature) ? 'Included in Full access. Untick Full access to choose one by one.' : undefined"
                                                 />
                                             </template>
                                             <template v-else>
@@ -271,7 +276,7 @@ const systemFeatures = computed(() => {
                         <div class="mt-3 flex flex-wrap items-center gap-3 text-xs text-gray-600 dark:text-gray-400">
                             <span class="font-medium text-gray-500 dark:text-gray-400">Set colors:</span>
                             <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-blue-100 text-blue-700 border border-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800">
-                                <span class="inline-block w-2 h-2 rounded-full bg-blue-400"></span> Master Data: tick the first row to let a role see a screen, the row under it to let it add, edit and delete
+                                <span class="inline-block w-2 h-2 rounded-full bg-blue-400"></span> Master Data: tick a screen to let a role see it, then what it may do there. Full access allows everything on that screen
                             </span>
                         </div>
                     </div>

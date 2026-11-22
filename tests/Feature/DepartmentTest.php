@@ -191,13 +191,13 @@ class DepartmentTest extends TestCase
 
     // ----- access -------------------------------------------------------------
 
-    public function test_viewers_can_list_and_export_but_not_import(): void
+    public function test_viewers_can_list_but_not_export_or_import(): void
     {
         $viewer = $this->userWith(['view departments']);
 
         $this->actingAs($viewer)->get(route('departments.index'))->assertOk()
-            ->assertInertia(fn (Assert $p) => $p->where('canManage', false));
-        $this->actingAs($viewer)->get(route('departments.export'))->assertOk();
+            ->assertInertia(fn (Assert $p) => $p->where('can', ['create' => false, 'edit' => false, 'delete' => false, 'import' => false, 'export' => false]));
+        $this->actingAs($viewer)->get(route('departments.export'))->assertForbidden();
         $this->actingAs($viewer)->get(route('departments.template'))->assertForbidden();
         $this->import($viewer, $this->csv(self::HEADINGS."d001,Sales,SAL,,Yes\n"))->assertForbidden();
 
