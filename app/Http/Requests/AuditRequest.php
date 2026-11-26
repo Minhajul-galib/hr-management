@@ -2,15 +2,23 @@
 
 namespace App\Http\Requests;
 
+use App\Support\AuditPermissions;
 use App\Support\AuditTemplate;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 class AuditRequest extends FormRequest
 {
+    /**
+     * Saving a new report needs `create audits`, saving an existing one `edit audits` (the
+     * routes check that too), and completing it, which locks the report, needs `complete audits`.
+     */
     public function authorize(): bool
     {
-        return $this->user()->can('manage audits');
+        $user = $this->user();
+
+        return AuditPermissions::allows($user, $this->routeIs('audits.store') ? 'create' : 'edit')
+            && ($this->input('action') !== 'complete' || AuditPermissions::allows($user, 'complete'));
     }
 
     protected function prepareForValidation(): void

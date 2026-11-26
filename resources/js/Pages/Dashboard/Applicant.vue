@@ -7,7 +7,7 @@ import { CheckCircle2, Mail, Briefcase } from 'lucide-vue-next';
 defineProps({
     applicant: {
         type: Object,
-        required: true, // { name, email, designation|null }
+        required: true, // { name, email, designation|null, designation_category|null }
     },
 });
 </script>
@@ -49,6 +49,9 @@ defineProps({
                                 <dt class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Designation</dt>
                                 <dd class="text-sm font-medium text-gray-900 dark:text-gray-100">
                                     {{ applicant.designation || 'Not specified' }}
+                                    <span v-if="applicant.designation && applicant.designation_category" class="font-normal text-gray-500 dark:text-gray-400">
+                                        · {{ applicant.designation_category }}
+                                    </span>
                                 </dd>
                             </div>
                         </div>

@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useForm } from '@inertiajs/vue3';
 import { Plus, Trash2, AlertTriangle, Save, CheckCircle2, Building2, ClipboardList, Users, Layers, FileCheck2, Flame, ListChecks, Award } from 'lucide-vue-next';
 import { useSweetAlert } from '@/composables/useSweetAlert';
-import { inputClass, ratingClasses, resultClasses, resultSwatch } from '../Composables/useAuditMeta';
+import { inputClass, ratingClasses, resultClasses, resultSwatch, useAuditPermissions } from '../Composables/useAuditMeta';
 
 const props = defineProps({
     audit: { type: Object, required: true },
@@ -66,6 +66,8 @@ const buildData = (audit) => {
 };
 
 const form = useForm(buildData(props.audit));
+// Completing locks the report, so it has its own permission; saving a draft only needs create / edit.
+const { canComplete } = useAuditPermissions();
 
 const isEdit = computed(() => Boolean(props.audit.id));
 
@@ -747,6 +749,7 @@ const errorText = 'mt-1 text-xs text-red-600 dark:text-red-400';
                         <Save :size="15" /> Save Draft
                     </button>
                     <button
+                        v-if="canComplete"
                         type="button"
                         :disabled="form.processing"
                         class="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-xs font-semibold uppercase tracking-widest text-white hover:bg-indigo-500 disabled:opacity-50"

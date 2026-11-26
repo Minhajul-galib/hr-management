@@ -57,8 +57,16 @@ export function useAuditPermissions() {
     const page = usePage();
     const permissions = computed(() => page.props.auth?.permissions || []);
 
+    // Each action has its own permission; `manage audits` is full access and stands in for all.
+    const may = (permission) => computed(() =>
+        permissions.value.includes(permission) || permissions.value.includes('manage audits'));
+
     return {
-        canManage: computed(() => permissions.value.includes('manage audits')),
-        canUpdateCap: computed(() => permissions.value.includes('update audit cap') || permissions.value.includes('manage audits')),
+        canCreate: may('create audits'),
+        canEdit: may('edit audits'),
+        canDelete: may('delete audits'),
+        canComplete: may('complete audits'),
+        canReopen: may('reopen audits'),
+        canUpdateCap: may('update audit cap'),
     };
 }

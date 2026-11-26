@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuditController;
 use App\Http\Controllers\MasterDataController;
+use App\Support\AuditPermissions;
 use App\Support\MasterData\MasterDataRegistry;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RoleController;
@@ -93,8 +94,12 @@ Route::middleware('auth')->group(function () {
     Route::middleware('permission:manage units|create units')->group(function () {
         Route::get('/units/create', [\App\Http\Controllers\UnitController::class, 'create'])->name('units.create');
         Route::post('/units', [\App\Http\Controllers\UnitController::class, 'store'])->name('units.store');
-        Route::post('/units/import', [\App\Http\Controllers\UnitController::class, 'import'])->name('units.import');
-        Route::get('/units/template/download', [\App\Http\Controllers\UnitController::class, 'downloadTemplate'])->name('units.template');
+        // The Excel import is the same reviewed import the other masters use (preview → review → import),
+        // part of adding units, so it needs no permission of its own. See MasterDataRegistry::standalone().
+        Route::post('/units/import', [MasterDataController::class, 'import'])->defaults('type', 'units')->name('units.import');
+        Route::post('/units/import/preview', [MasterDataController::class, 'preview'])->defaults('type', 'units')->name('units.import.preview');
+        Route::post('/units/import/check', [MasterDataController::class, 'check'])->defaults('type', 'units')->name('units.import.check');
+        Route::get('/units/template/download', [MasterDataController::class, 'template'])->defaults('type', 'units')->name('units.template');
     });
     Route::middleware('permission:manage units|edit units')->group(function () {
         Route::get('/units/{unit}/edit', [\App\Http\Controllers\UnitController::class, 'edit'])->name('units.edit');
@@ -105,27 +110,36 @@ Route::middleware('auth')->group(function () {
         Route::post('/units/{id}/restore', [\App\Http\Controllers\UnitController::class, 'restore'])->name('units.restore');
         Route::delete('/units/{id}/force', [\App\Http\Controllers\UnitController::class, 'forceDestroy'])->name('units.force-destroy');
     });
+    // Exporting is reading what the list already shows. Registered before /units/{unit} so "export" is not taken for an id.
+    Route::get('/units/export', [MasterDataController::class, 'export'])->defaults('type', 'units')->middleware('permission:manage units|view units')->name('units.export');
     Route::middleware('permission:manage units|view units|create units|edit units|delete units')->group(function () {
         Route::get('/units', [\App\Http\Controllers\UnitController::class, 'index'])->name('units.index');
         Route::get('/units/{unit}', [\App\Http\Controllers\UnitController::class, 'show'])->name('units.show');
     });
 
-    Route::middleware('permission:view audits|manage audits|update audit cap')->prefix('audits')->name('audits.')->group(function () {
+    // Internal Audit (Compliance): any audit permission opens the module; each action then needs its
+    // own (`manage audits` is full access). See App\Support\AuditPermissions. /create is registered
+    // before /{audit} so it is not taken for an audit id.
+    Route::middleware('permission:'.implode('|', AuditPermissions::opening()))->prefix('audits')->name('audits.')->group(function () {
         Route::get('/', [AuditController::class, 'index'])->name('index');
 
-        Route::middleware('permission:manage audits')->group(function () {
+        Route::middleware(AuditPermissions::middleware('create'))->group(function () {
             Route::get('/create', [AuditController::class, 'create'])->name('create');
             Route::post('/', [AuditController::class, 'store'])->name('store');
+        });
+
+        Route::middleware(AuditPermissions::middleware('edit'))->group(function () {
             Route::get('/{audit}/edit', [AuditController::class, 'edit'])->name('edit');
             Route::put('/{audit}', [AuditController::class, 'update'])->name('update');
-            Route::delete('/{audit}', [AuditController::class, 'destroy'])->name('destroy');
-            Route::post('/{audit}/reopen', [AuditController::class, 'reopen'])->name('reopen');
         });
+
+        Route::delete('/{audit}', [AuditController::class, 'destroy'])->middleware(AuditPermissions::middleware('delete'))->name('destroy');
+        Route::post('/{audit}/reopen', [AuditController::class, 'reopen'])->middleware(AuditPermissions::middleware('reopen'))->name('reopen');
 
         Route::get('/{audit}', [AuditController::class, 'show'])->name('show');
         Route::get('/{audit}/print', [AuditController::class, 'print'])->name('print');
         Route::patch('/findings/{finding}/cap', [AuditController::class, 'updateCap'])
-            ->middleware('permission:update audit cap|manage audits')
+            ->middleware(AuditPermissions::middleware('cap'))
             ->name('findings.cap');
     });
 
@@ -165,6 +179,8 @@ Route::middleware('auth')->group(function () {
             Route::post('/', [MasterDataController::class, 'store'])->defaults('type', $key)->middleware($can('create'))->name('store');
             Route::put('/{id}', [MasterDataController::class, 'update'])->defaults('type', $key)->middleware($can('edit'))->whereNumber('id')->name('update');
             Route::delete('/{id}', [MasterDataController::class, 'destroy'])->defaults('type', $key)->middleware($can('delete'))->whereNumber('id')->name('destroy');
+            // Ticked rows at once: move to the Trash, restore, or delete for good (all need `delete`).
+            Route::post('/bulk', [MasterDataController::class, 'bulk'])->defaults('type', $key)->middleware($can('delete'))->name('bulk');
 
             if (isset($master['import'])) {
                 Route::get('/export', [MasterDataController::class, 'export'])->defaults('type', $key)->middleware($can('export'))->name('export');
@@ -178,6 +194,30 @@ Route::middleware('auth')->group(function () {
             }
         });
     }
+
+    // Grades & Pay Scales: the salary formulas grades are paid by. Adding, changing and deleting a
+    // formula need `create`, `edit` and `delete grades` (or full access); the editor's live preview
+    // needs either of the first two.
+    Route::prefix('master-data/grades/pay-scales')->name('grades.pay-scales.')->group(function () {
+        $can = fn (string ...$actions) => 'permission:'.implode('|', array_unique(array_merge(...array_map(fn ($a) => MasterDataRegistry::allowing('grades', $a), $actions))));
+        $controller = \App\Http\Controllers\GradePayScaleController::class;
+
+        Route::post('/preview', [$controller, 'preview'])->middleware($can('create', 'edit'))->name('preview');
+        Route::post('/', [$controller, 'store'])->middleware($can('create'))->name('store');
+        Route::put('/{payScale}', [$controller, 'update'])->middleware($can('edit'))->whereNumber('payScale')->name('update');
+        Route::delete('/{payScale}', [$controller, 'destroy'])->middleware($can('delete'))->whereNumber('payScale')->name('destroy');
+    });
+
+    // Designations: the categories each designation belongs to (Merchandising, Machine Operators, ...).
+    // Adding, renaming and deleting one need `create`, `edit` and `delete designations` (or full access).
+    Route::prefix('master-data/designations/categories')->name('designations.categories.')->group(function () {
+        $can = fn (string $action) => 'permission:'.implode('|', MasterDataRegistry::allowing('designations', $action));
+        $controller = \App\Http\Controllers\DesignationCategoryController::class;
+
+        Route::post('/', [$controller, 'store'])->middleware($can('create'))->name('store');
+        Route::put('/{category}', [$controller, 'update'])->middleware($can('edit'))->whereNumber('category')->name('update');
+        Route::delete('/{category}', [$controller, 'destroy'])->middleware($can('delete'))->whereNumber('category')->name('destroy');
+    });
 
     Route::middleware('permission:manage settings')->group(function () {
         Route::get('/settings', [\App\Http\Controllers\SettingController::class, 'index'])->name('settings.index');

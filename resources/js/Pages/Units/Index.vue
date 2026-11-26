@@ -1,10 +1,12 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
-import { ref } from 'vue';
+import { nextTick, ref, watch } from 'vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
-import Modal from '@/Components/Modal.vue';
+import ImportDialog from '@/Components/MasterData/ImportDialog.vue';
+import ImportResult from '@/Components/MasterData/ImportResult.vue';
+import ImportReview from '@/Components/MasterData/ImportReview.vue';
 import { Phone, Mail, MessageCircle, Eye, Edit, Trash2, Building2, Users, MapPin, User, Shield, ChevronDown, ChevronUp, Search } from 'lucide-vue-next';
 import { useSweetAlert } from '@/composables/useSweetAlert';
 
@@ -14,6 +16,11 @@ const props = defineProps({
     showTrashed: Boolean,
     departments: { type: Array, default: () => [] },
     unassignedUsers: { type: Array, default: () => [] },
+    // The Excel import is the one every master uses: upload → review grid → import.
+    importDefinition: { type: Object, required: true },
+    importLimits: { type: Object, required: true },
+    // Flashed once, right after an import.
+    importResult: { type: Object, default: null },
 });
 
 import { computed } from 'vue';
@@ -68,7 +75,33 @@ const filteredUnits = computed(() => {
     return result;
 });
 
-const showImportModal = ref(false);
+// ----- Excel import ----------------------------------------------------------
+
+const showImport = ref(false);
+
+// An uploaded file waiting for review: { file, rows, summary, token }. Nothing is saved until it is imported.
+const review = ref(null);
+const reviewPanel = ref(null);
+
+const openReview = (preview) => {
+    showImport.value = false;
+    lastImport.value = null;
+    review.value = { ...preview, token: Date.now() };
+    nextTick(() => reviewPanel.value?.$el?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+};
+
+// What the last import did; it stays on the page until dismissed.
+const lastImport = ref(props.importResult);
+const importPanel = ref(null);
+
+watch(
+    () => props.importResult,
+    (result) => {
+        if (!result) return;
+        lastImport.value = result;
+        nextTick(() => importPanel.value?.$el?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    },
+);
 
 // Department section helpers
 const deptSearch = ref('');
@@ -96,10 +129,6 @@ const roleColor = (role) => {
     };
     return map[role] || 'bg-gray-100 text-gray-700 border-gray-200';
 };
-const importForm = useForm({
-    file: null,
-});
-
 // Row selection for bulk delete
 const selectedUnitIds = ref([]);
 const isBulkDeleting = ref(false);
@@ -149,43 +178,6 @@ const bulkDeleteSelected = async () => {
     isBulkDeleting.value = false;
 };
 
-const openImportModal = () => {
-    importForm.reset();
-    importForm.clearErrors();
-    showImportModal.value = true;
-};
-
-const closeImportModal = () => {
-    showImportModal.value = false;
-    importForm.reset();
-};
-
-const handleFileChange = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    const allowedTypes = [
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'application/vnd.ms-excel'
-    ];
-    const allowedExtensions = ['.xlsx', '.xls'];
-    const fileName = file.name.toLowerCase();
-    const valid = allowedExtensions.some(ext => fileName.endsWith(ext));
-    if (!valid) {
-        const { showError } = useSweetAlert();
-        showError('Only .xlsx and .xls files are accepted.', 'Invalid file');
-        event.target.value = '';
-        importForm.file = null;
-        return;
-    }
-    importForm.file = file;
-};
-
-const submitImport = () => {
-    importForm.post(route('units.import'), {
-        onSuccess: () => closeImportModal(),
-    });
-};
-
 const deleteUnit = (unit) => {
     const { showDeleteConfirm } = useSweetAlert();
     Promise.resolve(showDeleteConfirm(`Are you sure you want to delete unit "${unit.name}"?`)).then((result) => {
@@ -221,7 +213,15 @@ const getStatusBadgeClass = (isActive) => {
                     <Link v-if="canDelete" :href="route('units.index', props.showTrashed ? {} : { trash: 1 })">
                         <SecondaryButton>{{ props.showTrashed ? 'Back to List' : 'Show Trash' }}</SecondaryButton>
                     </Link>
-                    <SecondaryButton v-if="canCreate" @click="openImportModal">Import Excel</SecondaryButton>
+                    <a
+                        v-if="canView && !props.showTrashed"
+                        :href="route('units.export')"
+                        class="inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-widest text-gray-700 shadow-sm transition duration-150 ease-in-out hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                        title="Download the unit list as Excel, in the layout the import reads"
+                    >
+                        Export
+                    </a>
+                    <SecondaryButton v-if="canCreate" @click="showImport = true">Import Excel</SecondaryButton>
                     <Link v-if="canCreate" :href="route('units.create')">
                         <PrimaryButton>Create New Unit</PrimaryButton>
                     </Link>
@@ -232,6 +232,29 @@ const getStatusBadgeClass = (isActive) => {
         <div class="py-12">
           
             <div class="mx-auto max-w-7xl sm:px-4 lg:px-4 xl:max-w-[1440px] 2xl:max-w-[1600px]">
+
+                <div v-if="canCreate && (review || lastImport)" class="mb-6 space-y-6">
+                    <ImportReview
+                        v-if="review"
+                        ref="reviewPanel"
+                        :key="review.token"
+                        :definition="importDefinition"
+                        :preview="review"
+                        :check-url="route('units.import.check')"
+                        :import-url="route('units.import')"
+                        @close="review = null"
+                        @imported="review = null"
+                    />
+
+                    <ImportResult
+                        v-if="lastImport"
+                        ref="importPanel"
+                        :result="lastImport"
+                        :match-label="importDefinition.import.match_label"
+                        plural="units"
+                        @dismiss="lastImport = null"
+                    />
+                </div>
 
                 <div class="bg-white dark:bg-gray-800 overflow-hidden shadow-sm sm:rounded-lg">
 
@@ -474,62 +497,19 @@ const getStatusBadgeClass = (isActive) => {
             <!-- ===== End Department Section ===== -->
         </div>
 
-        <Modal :show="showImportModal" @close="closeImportModal">
-            <div class="p-6 dark:bg-gray-800">
-                <h2 class="text-lg font-medium text-gray-900 dark:text-gray-100">Import Units from Excel</h2>
-
-                <div class="mt-6">
-                    <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-4 mb-4">
-                        <div class="flex items-start">
-                            <div class="flex-shrink-0">
-                                <svg class="h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
-                                </svg>
-                            </div>
-                            <div class="ml-3 flex-1">
-                                <p class="text-sm text-blue-700 dark:text-blue-300">
-                                    Download the sample template to see the correct format for importing units.
-                                </p>
-                                <div class="mt-2">
-                                    <a
-                                        :href="route('units.template')"
-                                        class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/40 hover:bg-blue-200 dark:hover:bg-blue-900/60 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                                    >
-                                        <svg class="mr-1.5 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                        </svg>
-                                        Download Sample Template
-                                    </a>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                        Upload an Excel file (.xlsx, .xls) with unit data. Required columns: unit_code (numbers and small letters only, with at least one number, e.g. 101), name. Optional: location, contact_person, phone_number, email, is_active.
-                    </p>
-
-                    <input
-                        type="file"
-                        @change="handleFileChange"
-                        accept=".xlsx,.xls"
-                        class="block w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 dark:file:bg-indigo-900/40 file:text-indigo-700 dark:file:text-indigo-300 hover:file:bg-indigo-100 dark:hover:file:bg-indigo-900/60"
-                    />
-                    <p v-if="importForm.errors.file" class="mt-2 text-sm text-red-600">{{ importForm.errors.file }}</p>
-                </div>
-
-                <div class="mt-6 flex justify-end">
-                    <SecondaryButton @click="closeImportModal">Cancel</SecondaryButton>
-                    <PrimaryButton 
-                        class="ml-3" 
-                        @click="submitImport" 
-                        :class="{ 'opacity-25': importForm.processing }" 
-                        :disabled="importForm.processing || !importForm.file"
-                    >
-                        Import
-                    </PrimaryButton>
-                </div>
-            </div>
-        </Modal>
+        <ImportDialog
+            v-if="canCreate"
+            :show="showImport"
+            title="Import units from Excel"
+            :preview-url="route('units.import.preview')"
+            :template-url="route('units.template')"
+            :limits="importLimits"
+            :columns="importDefinition.import.columns"
+            :match-label="importDefinition.import.match_label"
+            singular="unit"
+            :samples="importDefinition.import.samples"
+            @close="showImport = false"
+            @previewed="openReview"
+        />
     </AuthenticatedLayout>
 </template>

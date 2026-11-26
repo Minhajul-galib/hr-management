@@ -6,7 +6,6 @@ use App\Exports\MasterDataExport;
 use App\Models\Department;
 use App\Models\Grade;
 use App\Models\LeaveType;
-use App\Models\SalaryType;
 use App\Models\User;
 use App\Support\Holidays\SpreadsheetRows;
 use App\Support\MasterData\MasterDataImporter;
@@ -50,11 +49,6 @@ class MasterDataImportTest extends TestCase
         return Department::create(['code' => $code, 'name' => $name, 'short_name' => $short, 'is_active' => true]);
     }
 
-    private function salaryType(string $code, string $name, float $value = 10, string $calculation = 'percent_of_basic'): SalaryType
-    {
-        return SalaryType::create(['code' => $code, 'name' => $name, 'calculation' => $calculation, 'value' => $value]);
-    }
-
     private function csv(string $body): UploadedFile
     {
         return UploadedFile::fake()->createWithContent('upload.csv', $body);
@@ -90,7 +84,7 @@ class MasterDataImportTest extends TestCase
     public function test_every_master_that_fits_one_row_per_record_has_an_import(): void
     {
         $this->assertSame(
-            ['departments', 'designations', 'salary-types', 'grades', 'leave-types', 'offence-types', 'document-types'],
+            ['departments', 'designations', 'grades', 'leave-types', 'offence-types', 'document-types'],
             array_keys(self::importableMasters()),
         );
         // Criteria and rating bands are lists, which a single sheet row can't hold.
@@ -128,10 +122,6 @@ class MasterDataImportTest extends TestCase
     #[DataProvider('importableMasters')]
     public function test_the_sample_rows_pass_every_check_once_they_are_edited(string $type, string $permission): void
     {
-        // The grade samples list salary type codes 120 and 652; they must exist for the row to pass.
-        $this->salaryType('120', 'Fixture A');
-        $this->salaryType('652', 'Fixture B');
-
         $definition = MasterDataRegistry::find($type);
         $columns = MasterDataImporter::columns($definition);
 
@@ -142,7 +132,7 @@ class MasterDataImportTest extends TestCase
             foreach ($columns as $field) {
                 $cells[$field['key']] = (string) MasterDataExport::cell($field, $example[$field['key']] ?? '');
             }
-            $cells['code'] .= 'X';
+            $cells['code'] .= '9'; // still a number where the master wants one (a grade's basic is worked out from it)
             $records[] = ['row' => $i + 2, 'cells' => $cells];
         }
 
@@ -395,155 +385,186 @@ class MasterDataImportTest extends TestCase
 
     // ----- a master that refers to another by code ----------------------------------------
 
-    public function test_grades_are_imported_with_their_salary_type_codes(): void
+    /** The id of the formula with this name (Group and VBL come with the app). */
+    private function formulaId(string $name): int
     {
-        $rent = $this->salaryType('120', 'House Rent', 50);
-        $conveyance = $this->salaryType('652', 'Conveyance', 10);
-        $existing = Grade::create(['code' => 'g1', 'name' => 'Grade 1', 'basic_min' => 100, 'basic_max' => 200]);
-        $existing->salaryTypes()->attach($rent);
-
-        $this->actingAs($this->manager('grades'))
-            ->post(route('grades.import'), ['file' => $this->csv("Code,Name,Basic Salary (Min),Basic Salary (Max),Salary Type Codes\n"
-                .'g1,Grade One,150,250,"120, 652"'."\n"   // updates g1 and adds a salary type
-                ."g2,Grade Two,90,95,652\n"                 // new
-                ."g3,Grade Three,1,2,\n"                    // new, no salary types
-                ."g4,Grade Four,1,2,999\n")])               // no such salary type
-            ->assertSessionHas('import_result', fn ($r) => $r['created_count'] === 2 && $r['updated_count'] === 1 && $r['error_count'] === 1 && $r['errors'][0]['row'] === 5);
-
-        $this->assertSame('Grade One', $existing->fresh()->name);
-        $this->assertEqualsCanonicalizing([$rent->id, $conveyance->id], $existing->salaryTypes()->pluck('salary_types.id')->all());
-        $this->assertSame([$conveyance->id], Grade::firstWhere('code', 'g2')->salaryTypes()->pluck('salary_types.id')->all());
-        $this->assertSame(0, Grade::firstWhere('code', 'g3')->salaryTypes()->count());
-        $this->assertNull(Grade::firstWhere('code', 'g4'));
+        return \App\Models\PayScale::where('name', $name)->value('id') ?? $this->fail("No formula called {$name}.");
     }
 
-    public function test_an_empty_salary_types_cell_keeps_what_is_saved(): void
+    private function grade(string $code, string $type, string $formula = 'Group', bool $active = true): Grade
     {
-        $rent = $this->salaryType('120', 'House Rent', 50);
-        $grade = Grade::create(['code' => 'g1', 'name' => 'Grade 1', 'basic_min' => 100, 'basic_max' => 200]);
-        $grade->salaryTypes()->attach($rent);
-
-        $this->actingAs($this->manager('grades'))
-            ->post(route('grades.import'), ['file' => $this->csv("Code,Name,Basic Salary (Min),Basic Salary (Max),Salary Type Codes\nG1,Grade One,100,200,\n")])
-            ->assertSessionHas('import_result', fn ($r) => $r['updated_count'] === 1);
-
-        $this->assertSame([$rent->id], $grade->salaryTypes()->pluck('salary_types.id')->all());
+        return Grade::create(['code' => $code, 'type' => $type, 'pay_scale_id' => $this->formulaId($formula), 'is_active' => $active]);
     }
 
-    public function test_changing_only_a_grades_salary_types_counts_as_an_update(): void
+    public function test_grades_are_imported_with_their_type_and_formula(): void
     {
-        $rent = $this->salaryType('120', 'House Rent', 50);
-        $this->salaryType('652', 'Conveyance', 10);
-        $grade = Grade::create(['code' => 'g1', 'name' => 'Grade 1', 'basic_min' => 100, 'basic_max' => 200]);
-        $grade->salaryTypes()->attach($rent);
+        $existing = $this->grade('400', Grade::GROUP_MALE);
 
-        $headings = "Code,Name,Basic Salary (Min),Basic Salary (Max),Salary Type Codes\n";
-        $changed = $this->row($this->preview('grades', 'grades', $headings."g1,Grade 1,100,200,\"652, 120\"\n")->json(), 2);
+        $this->actingAs($this->manager('grades'))
+            ->post(route('grades.import'), ['file' => $this->csv("Code,Type,Formula\n"
+                ."400,VBL - Male,VBL\n"                     // moves 400 to another type and formula
+                ."410,VBL - Male,vbl\n"                     // new; the formula's name in any case
+                ."420,Group - Female or 65 Ages,Group\n"    // new
+                ."430,Contract,Group\n"                     // no such type
+                ."440,Group - Male,Contract\n")])           // no such formula
+            ->assertSessionHas('import_result', fn ($r) => $r['created_count'] === 2 && $r['updated_count'] === 1 && $r['error_count'] === 2 && $r['errors'][0]['row'] === 5);
+
+        $this->assertSame([Grade::VBL_MALE, $this->formulaId('VBL')], [$existing->fresh()->type, $existing->fresh()->pay_scale_id]);
+        $this->assertSame($this->formulaId('VBL'), Grade::firstWhere('code', '410')->pay_scale_id);
+        $this->assertSame([Grade::GROUP_FEMALE_65, $this->formulaId('Group')], [Grade::firstWhere('code', '420')->type, Grade::firstWhere('code', '420')->pay_scale_id]);
+        $this->assertNull(Grade::firstWhere('code', '430'));
+        $this->assertNull(Grade::firstWhere('code', '440'));
+    }
+
+    public function test_an_unknown_formula_is_explained_and_a_near_miss_is_suggested(): void
+    {
+        $row = $this->row($this->preview('grades', 'grades', "Code,Type,Formula\n400,Group - Male,Grop\n")->json(), 2);
+
+        $this->assertSame('error', $row['status']);
+        $this->assertStringContainsString('"Grop" was not found', $row['errors']['pay_scale_id']);
+        $this->assertStringContainsString('Group, VBL', $row['errors']['pay_scale_id']);   // the names to use
+        $this->assertSame('Group', $row['suggestions']['pay_scale_id']);
+    }
+
+    public function test_a_grade_sheet_needs_code_type_and_formula_columns_and_nothing_else(): void
+    {
+        // No Formula column: refused, and it says which one is missing.
+        $this->actingAs($this->manager('grades'))
+            ->post(route('grades.import'), ['file' => $this->csv("Code,Type\n400,Group - Male\n")])
+            ->assertSessionHas('import_result', fn ($r) => str_contains($r['fatal'], '"Formula"'));
+        $this->assertSame(0, Grade::count());
+
+        // Code, Type and Formula are enough: the status column can be left out.
+        $this->actingAs($this->manager('grades'))
+            ->post(route('grades.import'), ['file' => $this->csv("Code,Type,Formula\n400,Group - Male,Group\n410,VBL - Female or 65 Ages,VBL\n")])
+            ->assertSessionHas('import_result', fn ($r) => $r['created_count'] === 2 && $r['error_count'] === 0);
+
+        $this->assertTrue(Grade::firstWhere('code', '400')->is_active);
+    }
+
+    public function test_a_new_grade_needs_a_formula_but_a_blank_one_keeps_an_existing_grades(): void
+    {
+        $existing = $this->grade('400', Grade::GROUP_MALE, 'VBL');
+
+        $json = $this->preview('grades', 'grades', "Code,Type,Formula\n400,Group - Male,\n410,Group - Male,\n")->json();
+
+        $this->assertSame('unchanged', $this->row($json, 2)['status']);                     // keeps VBL
+        $this->assertSame('error', $this->row($json, 3)['status']);
+        $this->assertArrayHasKey('pay_scale_id', $this->row($json, 3)['errors']);
+        $this->assertSame($this->formulaId('VBL'), $existing->fresh()->pay_scale_id);
+    }
+
+    public function test_a_grades_type_is_picked_by_its_label_or_its_value_and_a_wrong_one_is_refused(): void
+    {
+        $this->actingAs($this->manager('grades'))
+            ->post(route('grades.import'), ['file' => $this->csv("Code,Type,Formula\n"
+                ."401,vbl_male,VBL\n"                        // the stored value
+                ."402,group - female or 65 ages,Group\n"     // the label, in any case
+                ."403,Contract,Group\n"                      // not a type
+                ."404,,Group\n")])                           // no type
+            ->assertSessionHas('import_result', fn ($r) => $r['created_count'] === 2 && $r['error_count'] === 2);
+
+        $this->assertSame(Grade::VBL_MALE, Grade::firstWhere('code', '401')->type);
+        $this->assertSame(Grade::GROUP_FEMALE_65, Grade::firstWhere('code', '402')->type);
+
+        $row = $this->row($this->preview('grades', 'grades', "Code,Type,Formula\n403,Contract,Group\n")->json(), 2);
+        $this->assertStringContainsString('Group - Male', $row['errors']['type']); // the message lists the choices
+    }
+
+    public function test_a_grades_status_is_optional_in_an_import(): void
+    {
+        $inactive = $this->grade('400', Grade::GROUP_MALE, active: false);
+
+        $this->actingAs($this->manager('grades'))
+            ->post(route('grades.import'), ['file' => $this->csv("Code,Type,Formula,Status\n400,Group - Male,Group,\n410,VBL - Male,VBL,\n420,VBL - Male,VBL,No\n")])
+            ->assertSessionHas('import_result', fn ($r) => $r['created_count'] === 2 && $r['unchanged_count'] === 1 && $r['error_count'] === 0);
+
+        $this->assertFalse($inactive->fresh()->is_active);                    // blank keeps what is saved
+        $this->assertTrue(Grade::firstWhere('code', '410')->is_active);       // blank on a new grade means Active
+        $this->assertFalse(Grade::firstWhere('code', '420')->is_active);      // said No
+    }
+
+    public function test_changing_only_a_grades_type_or_formula_counts_as_an_update(): void
+    {
+        $this->grade('400', Grade::GROUP_MALE);
+
+        $changed = $this->row($this->preview('grades', 'grades', "Code,Type,Formula\n400,VBL - Male,Group\n")->json(), 2);
         $this->assertSame('update', $changed['status']);
-        $this->assertSame(['salary_type_ids' => '120'], $changed['was']);
-        $this->assertSame('652, 120', $changed['cells']['salary_type_ids']); // kept in the order it was typed
+        $this->assertSame('VBL - Male', $changed['cells']['type']);
 
-        // The same codes are not a change, however they are spaced or repeated.
-        $same = $this->row($this->preview('grades', 'grades', $headings."g1,Grade 1,100,200,\" 120 , 120 \"\n")->json(), 2);
+        $formula = $this->row($this->preview('grades', 'grades', "Code,Type,Formula\n400,Group - Male,VBL\n")->json(), 2);
+        $this->assertSame('update', $formula['status']);
+        $this->assertSame(['pay_scale_id' => 'Group'], $formula['was']);
+
+        $same = $this->row($this->preview('grades', 'grades', "Code,Type,Formula\n400,Group - Male,group\n")->json(), 2);
         $this->assertSame('unchanged', $same['status']);
-        $this->assertSame('120', $same['cells']['salary_type_ids']);
     }
 
-    public function test_unknown_salary_type_codes_are_reported_and_a_near_miss_is_suggested(): void
+    public function test_a_grade_whose_formula_uses_the_grade_must_be_a_number_in_an_import_too(): void
     {
-        $this->salaryType('120', 'House Rent', 50);
-        $this->salaryType('652', 'Conveyance', 10);
+        // Group's formulas use [Grade]; this one does not.
+        $flat = \App\Models\PayScale::create(['name' => 'Flat']);
+        $flat->lines()->create(['position' => 0, 'title' => 'Gross', 'formula' => '20000']);
 
-        $row = $this->row($this->preview('grades', 'grades', "Code,Name,Basic Salary (Min),Basic Salary (Max),Salary Type Codes\nG1,Grade 1,1,2,\"120, 65\"\n")->json(), 2);
+        $json = $this->preview('grades', 'grades', "Code,Type,Formula\ng1,Group - Male,Group\ng2,VBL - Male,Flat\n400,Group - Male,Group\n")->json();
 
-        $this->assertSame('error', $row['status']);
-        $this->assertStringContainsString('"65" was not found', $row['errors']['salary_type_ids']);
-        $this->assertSame('120, 652', $row['suggestions']['salary_type_ids']);
+        $this->assertSame('error', $this->row($json, 2)['status']);
+        $this->assertStringContainsString('The Group formula uses the grade number, so the grade must be a number such as 400.', $this->row($json, 2)['errors']['code']);
+        $this->assertSame('new', $this->row($json, 3)['status']);
+        $this->assertSame('new', $this->row($json, 4)['status']);
     }
 
-    public function test_salary_type_codes_that_are_not_close_to_any_get_no_suggestion(): void
+    public function test_exported_grades_carry_their_type_and_formula_and_import_back_unchanged(): void
     {
-        $this->salaryType('120', 'House Rent', 50);
-
-        $row = $this->row($this->preview('grades', 'grades', "Code,Name,Basic Salary (Min),Basic Salary (Max),Salary Type Codes\nG1,Grade 1,1,2,ZZZZZZ\n")->json(), 2);
-
-        $this->assertSame('error', $row['status']);
-        $this->assertArrayNotHasKey('salary_type_ids', $row['suggestions']);
-    }
-
-    public function test_grades_with_no_salary_types_on_file_say_to_add_them_first(): void
-    {
-        $row = $this->row($this->preview('grades', 'grades', "Code,Name,Basic Salary (Min),Basic Salary (Max),Salary Type Codes\nG1,Grade 1,1,2,120\n")->json(), 2);
-
-        $this->assertStringContainsString('Add them on the Salary Types page first', $row['errors']['salary_type_ids']);
-    }
-
-    public function test_an_inactive_salary_type_is_a_warning(): void
-    {
-        SalaryType::create(['code' => '120', 'name' => 'Old', 'calculation' => 'fixed', 'value' => 5, 'is_active' => false]);
-
-        $row = $this->row($this->preview('grades', 'grades', "Code,Name,Basic Salary (Min),Basic Salary (Max),Salary Type Codes\nG1,Grade 1,1,2,120\n")->json(), 2);
-
-        $this->assertSame('new', $row['status']);
-        $this->assertSame('120 is inactive.', $row['warnings']['salary_type_ids']);
-    }
-
-    public function test_exported_grades_carry_their_salary_type_codes_and_import_back_unchanged(): void
-    {
-        $rent = $this->salaryType('120', 'House Rent', 50);
-        $conveyance = $this->salaryType('652', 'Conveyance', 10);
-        $grade = Grade::create(['code' => 'g1', 'name' => 'Grade 1', 'basic_min' => 100, 'basic_max' => 200.5]);
-        $grade->salaryTypes()->attach([$conveyance->id, $rent->id]);
+        $this->grade('400', Grade::GROUP_FEMALE_65, 'VBL');
 
         $manager = $this->manager('grades');
         $response = $this->actingAs($manager)->get(route('grades.export'))->assertOk();
         $path = $response->baseResponse->getFile()->getPathname();
         $rows = SpreadsheetRows::read($path, 'xlsx', 'Grades');
 
-        $this->assertSame(['Code', 'Name', 'Basic Salary (Min)', 'Basic Salary (Max)', 'Salary Type Codes', 'Active'], array_slice($rows[0], 0, 6));
-        $this->assertEquals(['g1', 'Grade 1', 100, 200.5, '120, 652', 'Yes'], array_slice($rows[1], 0, 6)); // 100 may come back as 100.0
+        $this->assertSame(['Grade', 'Type', 'Formula', 'Active'], array_slice($rows[0], 0, 4));
+        $this->assertEquals(['400', 'Group - Female or 65 Ages', 'VBL', 'Yes'], array_slice($rows[1], 0, 4)); // 400 may come back as a number
 
         $this->actingAs($manager)
             ->post(route('grades.import'), ['file' => UploadedFile::fake()->createWithContent('grades.xlsx', file_get_contents($path))])
-            ->assertSessionHas('import_result', fn ($r) => $r['total'] === 1 && $r['unchanged_count'] === 1 && $r['error_count'] === 0);
+            ->assertSessionHas('import_result', fn ($r) => $r['unchanged_count'] === 1 && $r['updated_count'] === 0 && $r['error_count'] === 0);
     }
 
-    public function test_salary_types_import_with_a_type_column_and_the_percentage_in_the_value(): void
+    public function test_a_grades_sheet_that_still_has_the_old_columns_imports_and_ignores_them(): void
     {
-        $this->actingAs($this->manager('salary types'))
-            ->post(route('salary-types.import'), ['file' => $this->csv("Code,Salary Type,Type,Percentage\n"
-                ."120,House Rent,% of basic salary,45\n"
-                ."652,Medical,Fixed amount,750\n"
-                ."700,Bonus,percent_of_basic,150\n")]) // over 100%
-            ->assertSessionHas('import_result', fn ($r) => $r['created_count'] === 2 && $r['error_count'] === 1 && $r['errors'][0]['row'] === 4);
-
-        $this->assertDatabaseHas('salary_types', ['code' => '120', 'name' => 'House Rent', 'calculation' => 'percent_of_basic', 'value' => 45]);
-        $this->assertDatabaseHas('salary_types', ['code' => '652', 'calculation' => 'fixed', 'value' => 750]);
-        $this->assertDatabaseMissing('salary_types', ['code' => '700']);
+        // Name, the basic salary range and the salary type codes are no longer part of a grade and are ignored.
+        $this->actingAs($this->manager('grades'))
+            ->post(route('grades.import'), ['file' => $this->csv("Code,Name,Type,Formula,Basic Salary (Min),Basic Salary (Max),Salary Type Codes,Active\n"
+                .'400,Grade One,Group - Male,Group,150,250,130,Yes'."\n")])
+            ->assertSessionHas('import_result', fn ($r) => $r['created_count'] === 1 && $r['error_count'] === 0);
+        $this->assertSame(Grade::GROUP_MALE, Grade::firstWhere('code', '400')->type);
     }
 
-    public function test_numeric_salary_type_codes_continue_their_series(): void
+    public function test_a_zero_is_exported_as_a_zero_not_an_empty_cell_and_imports_back_unchanged(): void
     {
-        $this->salaryType('120', 'House Rent');
-        $this->salaryType('121', 'Medical');
+        // Each of these is a legitimate 0: a serial and a number of leave days.
+        \App\Models\Designation::create(['designation_category_id' => $this->designationCategory()->id, 'code' => '201', 'title' => 'Chairman', 'serial' => 0]);
+        LeaveType::create(['code' => '403', 'name' => 'Unpaid Leave', 'entitlement_days' => 0, 'accrual' => 'none', 'is_paid' => false]);
 
-        $json = $this->preview('salary-types', 'salary types', "Code,Name,Calculation,Value\n"
-            ."122,Conveyance,% of basic salary,10\n"
-            ."122,Food,Fixed amount,900\n"        // repeats row 2
-            ."120,Rent again,% of basic salary,5\n")->json(); // saved code, renamed
+        foreach ([
+            ['designations', 'designations', 'serial'],
+            ['leave-types', 'leave types', 'entitlement_days'],
+        ] as [$type, $permission, $key]) {
+            $definition = MasterDataRegistry::find($type);
+            $manager = $this->manager($permission);
+            $column = array_search($key, array_column(MasterDataImporter::columns($definition), 'key'), true);
 
-        $this->assertSame('new', $this->row($json, 2)['status']);
-        $this->assertSame('123', $this->row($json, 3)['suggestions']['code']);
-        $this->assertStringContainsString('already belongs to "House Rent"', $this->row($json, 4)['warnings']['code']);
-        $this->assertSame('124', $this->row($json, 4)['suggestions']['code']);
-    }
+            $path = $this->actingAs($manager)->get(route("{$type}.export"))->assertOk()->baseResponse->getFile()->getPathname();
+            $rows = SpreadsheetRows::read($path, 'xlsx', $definition['import']['sheet']);
 
-    public function test_a_salary_type_name_repeated_in_the_file_is_caught(): void
-    {
-        $json = $this->preview('salary-types', 'salary types', "Code,Name,Calculation,Value\n130,House Rent,% of basic salary,45\n131,house rent,% of basic salary,40\n")->json();
+            $this->assertNotNull($rows[1][$column] ?? null, "{$type}: the 0 in {$key} was written as an empty cell");
+            $this->assertEquals(0, $rows[1][$column], "{$type}: {$key}");
 
-        $this->assertSame('error', $this->row($json, 3)['status']);
-        $this->assertStringContainsString('already used on row 2', $this->row($json, 3)['errors']['name']);
+            $this->actingAs($manager)
+                ->post(route("{$type}.import"), ['file' => UploadedFile::fake()->createWithContent("{$type}.xlsx", file_get_contents($path))])
+                ->assertSessionHas('import_result', fn ($r) => $r['total'] === 1 && $r['unchanged_count'] === 1 && $r['error_count'] === 0);
+        }
     }
 
     public function test_an_exported_leave_type_file_imports_back_unchanged(): void

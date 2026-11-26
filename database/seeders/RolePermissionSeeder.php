@@ -7,6 +7,7 @@ use Spatie\Permission\Models\Role;
 use Spatie\Permission\Models\Permission;
 use App\Models\User;
 use App\Models\Department;
+use App\Support\AuditPermissions;
 use App\Support\MasterData\MasterDataRegistry;
 use Illuminate\Support\Facades\Hash;
 
@@ -44,9 +45,6 @@ class RolePermissionSeeder extends Seeder
             'manage notification settings',
             'view documentation',
             'access clifto talk',
-            'view audits',
-            'manage audits',
-            'update audit cap',
         ];
 
         // Workflow permissions
@@ -66,7 +64,7 @@ class RolePermissionSeeder extends Seeder
         ];
 
         // পারমিশনগুলো ডাটাবেসে সেভ করা
-        foreach (array_merge($permissions, $workflowPermissions, MasterDataRegistry::allPermissionNames()) as $permission) {
+        foreach (array_merge($permissions, $workflowPermissions, MasterDataRegistry::allPermissionNames(), AuditPermissions::names()) as $permission) {
             Permission::findOrCreate($permission);
         }
 

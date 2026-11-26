@@ -16,6 +16,8 @@ const props = defineProps({
     permissions: Array,
     // Every master-data screen: [{ label, actions: [{ action, permission, label? }], manage }], from the server.
     masterData: { type: Array, default: () => [] },
+    // Every Compliance system (Internal Audit), same shape as masterData.
+    compliance: { type: Array, default: () => [] },
 });
 
 const showRoleModal = ref(false);
@@ -145,8 +147,9 @@ const getSetLabelClass = (feature) => {
 
 const isParentRow = (feature) => feature.name && !feature.name.startsWith('↳');
 
-// Master data: each screen gets a row per thing a role can do on it (see, add, edit, delete,
-// and Excel import / export where the screen has them), then "Full access", which allows all.
+// Master data and Compliance: each screen gets a row per thing a role can do on it (see, add,
+// edit, delete, and Excel import / export or complete / reopen where the screen has them), then
+// "Full access", which allows all. A row's label comes from the server when it has one.
 const ACTION_LABELS = {
     create: 'Add',
     edit: 'Edit',
@@ -155,13 +158,13 @@ const ACTION_LABELS = {
     export: 'Export to Excel',
 };
 
-const masterRows = (master) => [
-    ...master.actions.map(({ action, permission, label }) =>
+const permissionRows = (group, setColor) => [
+    ...group.actions.map(({ action, permission, label }) =>
         action === 'view'
-            ? { name: master.label, permission, setColor: 'blue', impliedBy: master.manage }
-            : { name: `↳ ${label ?? ACTION_LABELS[action]}`, permission, setColor: 'blue', impliedBy: master.manage },
+            ? { name: group.label, permission, setColor, impliedBy: group.manage }
+            : { name: `↳ ${label ?? ACTION_LABELS[action]}`, permission, setColor, impliedBy: group.manage },
     ),
-    { name: '↳ Full access (manage)', permission: master.manage, setColor: 'blue' },
+    { name: '↳ Full access (manage)', permission: group.manage, setColor },
 ];
 
 // Define system features mapping with categories
@@ -177,8 +180,9 @@ const systemFeatures = computed(() => {
             { name: 'Settings', permission: 'manage settings' },
             { name: 'Documentation', permission: 'view documentation' },
         ]},
-        // Same order as the sidebar's Master Data group.
-        { category: 'Master Data', items: props.masterData.flatMap(masterRows) },
+        // Same order as the sidebar: Compliance, then Master Data.
+        { category: 'Compliance', items: props.compliance.flatMap((system) => permissionRows(system, 'emerald')) },
+        { category: 'Master Data', items: props.masterData.flatMap((master) => permissionRows(master, 'blue')) },
         { category: 'HR & Finance', items: [
             { name: 'Attendance', permission: 'view attendance' },
             { name: 'Leave Requests', permission: 'view leave requests' },
@@ -277,6 +281,9 @@ const systemFeatures = computed(() => {
                             <span class="font-medium text-gray-500 dark:text-gray-400">Set colors:</span>
                             <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-blue-100 text-blue-700 border border-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800">
                                 <span class="inline-block w-2 h-2 rounded-full bg-blue-400"></span> Master Data: tick a screen to let a role see it, then what it may do there. Full access allows everything on that screen
+                            </span>
+                            <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-800">
+                                <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span> Compliance: tick Internal Audit to let a role see audits, then what it may do (completing an audit locks the report). Full access allows everything
                             </span>
                         </div>
                     </div>

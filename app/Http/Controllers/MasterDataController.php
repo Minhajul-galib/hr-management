@@ -9,6 +9,8 @@ use App\Support\MasterData\MasterDataImporter;
 use App\Support\MasterData\MasterDataRegistry;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -16,6 +18,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -36,21 +39,32 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  * and reports what each row would do, check() re-checks the rows after they
  * are edited on the page, and import() saves the reviewed rows. Nothing is
  * stored until import(). (import() still takes a file directly, too.)
+ *
+ * Deleting moves a record to the Trash (the masters use SoftDeletes, as Units do). Ticking several
+ * rows and deleting them together is bulk(): move to the Trash, restore, or delete for good.
+ * `?trash=1` lists the Trash. All of it needs the master's `delete` permission, and a record
+ * that is in use (`in_use` in the registry) can be neither trashed nor deleted for good.
  */
 class MasterDataController extends Controller
 {
     private const PER_PAGE_OPTIONS = [25, 50, 100];
 
-    private const MAX_UPLOAD_KB = 5120;
-
     /** Problem rows of an import sent to the browser; the full count is always sent. */
     private const REPORT_LIST_LIMIT = 100;
+
+    /** Most records one bulk delete / restore may name. */
+    private const MAX_BULK = 1000;
+
+    /** How many records that could not be removed are named in the message. */
+    private const BLOCKED_LIST_LIMIT = 5;
 
     public function index(Request $request): Response|RedirectResponse
     {
         $type = $this->type($request);
         $definition = $this->definition($type);
         abort_unless(auth()->user()?->canAny(MasterDataRegistry::opening($definition)), 403);
+
+        $trash = $this->wantsTrash($request, $definition);
 
         $props = [
             'definition' => $this->publicDefinition($type, $definition),
@@ -59,20 +73,31 @@ class MasterDataController extends Controller
             'can' => $this->abilities($definition),
             // Flashed by import(); only present on the request right after an upload.
             'importResult' => session('import_result'),
-            'importLimits' => isset($definition['import'])
-                ? ['max_rows' => MasterDataImporter::MAX_ROWS, 'max_mb' => self::MAX_UPLOAD_KB / 1024]
-                : null,
+            'importLimits' => isset($definition['import']) ? MasterDataImporter::limits() : null,
+            // Showing the Trash instead of the list, and how much is in it (the button says so).
+            'trash' => $trash,
+            'trashedCount' => $this->trashedCount($definition),
         ];
 
+        // Grades & Pay Scales: each company's salary formulas.
+        if (! empty($definition['pay_scales'])) {
+            $props['payScales'] = GradePayScaleController::overview();
+        }
+
+        // Designations: the categories (Merchandising, Machine Operators, ...) each have their own ladder.
+        if (! empty($definition['designation_categories'])) {
+            $props['designationCategories'] = DesignationCategoryController::overview();
+        }
+
         if (! isset($definition['paginate'])) {
-            $props['records'] = $this->listQuery($definition)->get()
+            $props['records'] = $this->listQuery($definition, $trash)->get()
                 ->map(fn (Model $m) => $this->serialize($definition, $m))->values();
 
             return Inertia::render('MasterData/Index', $props);
         }
 
         $filters = $this->filters($request, $definition);
-        $page = $this->filtered($this->listQuery($definition), $definition, $filters)
+        $page = $this->filtered($this->listQuery($definition, $trash), $definition, $filters)
             ->paginate($filters['per_page'])
             ->withQueryString();
 
@@ -145,10 +170,84 @@ class MasterDataController extends Controller
             );
         }
 
-        $model->delete();
+        $model->delete(); // to the Trash
 
         return redirect()->route("{$type}.index", $this->listParams($request))
-            ->with('success', "{$definition['singular']} deleted.");
+            ->with('success', "{$definition['singular']} moved to Trash.");
+    }
+
+    /**
+     * Ticked rows, all at once: `action` is `trash` (move to the Trash), `restore` (back out of it)
+     * or `force` (delete for good, from the list or the Trash). Records that are in use are left alone and named.
+     */
+    public function bulk(Request $request): RedirectResponse
+    {
+        $type = $this->type($request);
+        $definition = $this->definition($type);
+        abort_unless($this->supportsTrash($definition), 404);
+        $this->authorizeFor($definition, 'delete');
+
+        $action = (string) $request->input('action');
+        if (! in_array($action, ['trash', 'restore', 'force'], true)) {
+            throw ValidationException::withMessages(['action' => 'Choose what to do with the selected rows.']);
+        }
+
+        $ids = $request->input('ids');
+        if (! is_array($ids) || ! array_is_list($ids) || $ids === [] || count($ids) > self::MAX_BULK) {
+            throw ValidationException::withMessages(['ids' => 'Select between 1 and '.number_format(self::MAX_BULK).' rows.']);
+        }
+        $ids = array_values(array_unique(array_map('intval', array_filter($ids, 'is_scalar'))));
+
+        $model = $definition['model'];
+        // Moving to the Trash takes live records, restoring takes those in the Trash, and deleting for good
+        // takes either (from the list, or from the Trash).
+        $records = match ($action) {
+            'trash' => $model::query(),
+            'restore' => $model::onlyTrashed(),
+            'force' => $model::withTrashed(),
+        };
+        $records = $records->whereKey($ids)->get();
+
+        $done = 0;
+        $blocked = [];
+        foreach ($records as $record) {
+            $reason = $action !== 'restore' && isset($definition['in_use']) ? $definition['in_use']($record) : null;
+
+            try {
+                if ($reason === null) {
+                    DB::transaction(fn () => match ($action) {
+                        'trash' => $record->delete(),
+                        'restore' => $record->restore(),
+                        'force' => $record->forceDelete(),
+                    });
+                    $done++;
+                    continue;
+                }
+            } catch (QueryException $e) {
+                // Something else still points at it (e.g. a row of another table).
+                Log::warning("{$definition['label']}: could not delete #{$record->getKey()}.", ['error' => $e->getMessage()]);
+                $reason = 'other records still depend on it';
+            }
+
+            $blocked[] = Str::limit((string) $record->getAttribute($definition['title_key']), 40)." ({$reason})";
+        }
+
+        $back = redirect()->route("{$type}.index", $this->listParams($request));
+        if ($done === 0 && $blocked === []) {
+            return $back->with('error', 'Nothing was found to '.['trash' => 'move to the Trash', 'restore' => 'restore', 'force' => 'delete'][$action].'. It may already have been changed.');
+        }
+
+        if ($done > 0) {
+            $noun = mb_strtolower($done === 1 ? $definition['singular'] : $definition['label']);
+            $back->with('success', "{$done} {$noun} ".['trash' => 'moved to the Trash', 'restore' => 'restored', 'force' => 'deleted permanently'][$action].'.');
+        }
+        if ($blocked) {
+            $shown = implode('; ', array_slice($blocked, 0, self::BLOCKED_LIST_LIMIT));
+            $more = count($blocked) > self::BLOCKED_LIST_LIMIT ? '; and '.(count($blocked) - self::BLOCKED_LIST_LIMIT).' more' : '';
+            $back->with('error', count($blocked).' could not be '.($action === 'force' ? 'deleted' : 'moved to the Trash').": {$shown}{$more}. Mark them inactive instead.");
+        }
+
+        return $back;
     }
 
     // ----- Excel import / export ------------------------------------------------
@@ -275,11 +374,11 @@ class MasterDataController extends Controller
     private function validateUpload(Request $request): void
     {
         $request->validate([
-            'file' => ['required', 'file', 'extensions:xlsx,xls,csv', 'max:'.self::MAX_UPLOAD_KB],
+            'file' => ['required', 'file', 'extensions:xlsx,xls,csv', 'max:'.MasterDataImporter::MAX_UPLOAD_KB],
         ], [
             'file.required' => 'Choose an Excel file to upload.',
             'file.extensions' => 'Upload an Excel file (.xlsx or .xls) or a .csv file.',
-            'file.max' => 'The file is too large — '.(self::MAX_UPLOAD_KB / 1024).' MB at most.',
+            'file.max' => 'The file is too large — '.(MasterDataImporter::MAX_UPLOAD_KB / 1024).' MB at most.',
         ]);
     }
 
@@ -352,9 +451,12 @@ class MasterDataController extends Controller
         return $definition;
     }
 
-    private function listQuery(array $definition): Builder
+    private function listQuery(array $definition, bool $trash = false): Builder
     {
-        $query = $definition['model']::query()->with($this->relations($definition));
+        $query = $definition['model']::query()->with([...$this->relations($definition), ...($definition['with'] ?? [])]);
+        if ($trash) {
+            $query->onlyTrashed();
+        }
         foreach ($definition['order'] as [$column, $direction]) {
             $query->orderBy($column, $direction);
         }
@@ -410,14 +512,47 @@ class MasterDataController extends Controller
     private function listParams(Request $request): array
     {
         return array_filter(
-            Arr::only($request->query(), ['search', 'status', 'per_page', 'page']),
+            Arr::only($request->query(), ['search', 'status', 'per_page', 'page', 'trash']),
             fn ($value) => is_scalar($value) && $value !== '',
         );
     }
 
-    /** Abort unless the user holds this action's permission or full access (`manage`). */
+    /** Whether records of this master go to a Trash first (its model uses SoftDeletes). */
+    private function supportsTrash(array $definition): bool
+    {
+        return in_array(SoftDeletes::class, class_uses_recursive($definition['model']), true);
+    }
+
+    /** Is the Trash being asked for? Seeing it takes the `delete` permission, as emptying it does. */
+    private function wantsTrash(Request $request, array $definition): bool
+    {
+        if (! $request->boolean('trash') || ! $this->supportsTrash($definition)) {
+            return false;
+        }
+        $this->authorizeFor($definition, 'delete');
+
+        return true;
+    }
+
+    /** How many records are in the Trash; only counted for those who may open it. */
+    private function trashedCount(array $definition): int
+    {
+        if (! $this->supportsTrash($definition) || ! auth()->user()?->canAny(MasterDataRegistry::allowing($definition['permission'], 'delete'))) {
+            return 0;
+        }
+
+        return $definition['model']::onlyTrashed()->count();
+    }
+
+    /**
+     * Abort unless the user holds this action's permission or full access (`manage`).
+     * A master without that action's own permission may name the one that covers it
+     * (`permissions` => ['import' => 'create'] for Units, whose Excel import is part of adding units).
+     */
     private function authorizeFor(array $definition, string $action): void
     {
+        $action = $definition['permissions'][$action] ?? $action;
+
         abort_unless(auth()->user()?->canAny(MasterDataRegistry::allowing($definition['permission'], $action)), 403);
     }
 
@@ -497,7 +632,7 @@ class MasterDataController extends Controller
                 : $model->getAttribute($field['key']);
         }
 
-        // Values worked out from the record (e.g. a grade's gross range).
+        // Values worked out from the record, for masters that define `computed`.
         if (isset($definition['computed'])) {
             $row += ($definition['computed'])($model);
         }
@@ -517,56 +652,23 @@ class MasterDataController extends Controller
             }
 
             $spec = $field['lookup'];
-            $lookups[$field['key']] = $spec['model']::query()
-                ->orderBy($spec['order'] ?? 'name')
+            $query = $spec['model']::query()->with($spec['with'] ?? []);
+            foreach ((array) ($spec['order'] ?? 'name') as $column) {
+                $query->orderBy($column);
+            }
+
+            $lookups[$field['key']] = $query
                 ->get()
                 ->map(fn (Model $m) => [
                     'value' => $m->getKey(),
-                    'label' => $spec['label']($m).($m->is_active ? '' : ' (inactive)'),
-                    'active' => (bool) $m->is_active,
+                    // A master without a status (e.g. salary formulas) is always active.
+                    'label' => $spec['label']($m).(($m->is_active ?? true) ? '' : ' (inactive)'),
+                    'active' => (bool) ($m->is_active ?? true),
                 ] + (isset($spec['extra']) ? $spec['extra']($m) : []))
                 ->values();
         }
 
         return $lookups;
-    }
-
-    /** The sheet's columns, for the upload dialog and the review grid. */
-    private function importDefinition(array $definition): array
-    {
-        $match = MasterDataImporter::matchKeys($definition);
-
-        $columns = array_map(function (array $f) use ($match) {
-            $choices = match (true) {
-                $f['type'] === 'boolean' => [['value' => 'Yes', 'label' => 'Yes'], ['value' => 'No', 'label' => 'No']],
-                $f['type'] === 'multiselect' => null, // a list of codes, typed
-                isset($f['lookup']) => array_map(
-                    fn ($t) => ['value' => $t['code'], 'label' => "{$t['code']} — {$t['label']}".($t['active'] ? '' : ' (inactive)')],
-                    MasterDataImporter::lookupTargets($f),
-                ),
-                $f['type'] === 'select' => array_map(fn ($o) => ['value' => $o['label'], 'label' => $o['label']], $f['options']),
-                default => null,
-            };
-
-            return [
-                'key' => $f['key'],
-                'label' => MasterDataImporter::heading($f),
-                'type' => $f['type'],
-                'required' => ! empty($f['required']),
-                'uppercase' => ! empty($f['uppercase']),
-                'lowercase' => ! empty($f['lowercase']),
-                'match' => in_array($f['key'], $match, true),
-                'choices' => $choices,
-            ];
-        }, MasterDataImporter::columns($definition));
-
-        $labels = array_column($columns, 'label', 'key');
-
-        return [
-            'columns' => $columns,
-            'match_label' => implode(' + ', array_map(fn ($k) => $labels[$k], $match)),
-            'samples' => count($definition['import']['examples'] ?? []),
-        ];
     }
 
     /** What the page needs to render the master; server-side closures stay behind. */
@@ -581,7 +683,8 @@ class MasterDataController extends Controller
             'columns' => $definition['columns'],
             'filters' => $definition['filters'] ?? [],
             'paginate' => isset($definition['paginate']),
-            'import' => isset($definition['import']) ? $this->importDefinition($definition) : null,
+            'trash' => $this->supportsTrash($definition),
+            'import' => isset($definition['import']) ? MasterDataImporter::describe($definition) : null,
             'fields' => array_map(fn ($f) => Arr::except($f, ['lookup', 'relation']), $definition['fields']),
         ];
     }

@@ -24,7 +24,11 @@ class RegisteredUserController extends Controller
     public function create(): Response
     {
         return Inertia::render('Auth/Register', [
-            'designations' => $this->activeDesignations()->get(['id', 'code', 'title']),
+            // Each carries its category's name, so the form can group them: Executive in one
+            // category is not Executive in another.
+            'designations' => $this->activeDesignations()->get(['id', 'designation_category_id', 'code', 'title'])
+                ->map(fn (Designation $d) => ['id' => $d->id, 'code' => $d->code, 'title' => $d->title, 'category' => $d->category->name])
+                ->values(),
         ]);
     }
 
@@ -69,10 +73,11 @@ class RegisteredUserController extends Controller
     }
 
     /**
-     * Designations an applicant may choose, most senior first.
+     * Designations an applicant may choose: category by category, each most senior first.
      */
     private function activeDesignations()
     {
-        return Designation::where('is_active', true)->orderBy('serial')->orderBy('title');
+        return Designation::with('category:id,name')->where('is_active', true)
+            ->orderBy('designation_category_id')->orderBy('serial')->orderBy('title');
     }
 }

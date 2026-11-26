@@ -2,11 +2,23 @@
 import InputError from '@/Components/InputError.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { User, Mail, Lock, Eye, EyeOff, Phone, Briefcase } from 'lucide-vue-next';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 const props = defineProps({
-    // Active designations from the master list: [{ id, code, title }]
+    // Active designations from the master list, in category order: [{ id, code, title, category }]
     designations: { type: Array, default: () => [] },
+});
+
+// The same title can sit in two categories (an Executive and a Merchandising one), so the list is
+// grouped by category.
+const designationGroups = computed(() => {
+    const groups = [];
+    for (const designation of props.designations) {
+        let group = groups.find((g) => g.name === designation.category);
+        if (!group) groups.push((group = { name: designation.category, designations: [] }));
+        group.designations.push(designation);
+    }
+    return groups;
 });
 
 const form = useForm({
@@ -123,7 +135,9 @@ const submit = () => {
                                 class="block w-full pl-10 pr-3 py-3 border border-gray-300 dark:border-gray-600 rounded-xl text-gray-900 dark:text-gray-100 dark:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                             >
                                 <option value="" disabled>Select your designation</option>
-                                <option v-for="d in props.designations" :key="d.id" :value="d.id">{{ d.title }}</option>
+                                <optgroup v-for="group in designationGroups" :key="group.name" :label="group.name">
+                                    <option v-for="d in group.designations" :key="d.id" :value="d.id">{{ d.title }}</option>
+                                </optgroup>
                             </select>
                         </div>
                         <InputError class="text-xs" :message="form.errors.designation_id" />

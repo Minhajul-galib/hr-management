@@ -9,6 +9,7 @@ use Spatie\Permission\PermissionRegistrar;
 use Inertia\Inertia;
 use App\Models\User;
 use App\Notifications\RolePermissionUpdatedNotification;
+use App\Support\AuditPermissions;
 use App\Support\MasterData\MasterDataRegistry;
 use Illuminate\Support\Carbon;
 
@@ -62,9 +63,6 @@ class RoleController extends Controller
             'manage notification settings',
             'manage settings',
             'manage document statuses',
-            'view audits',
-            'manage audits',
-            'update audit cap',
             // Workflow Permissions
             'workflow-purchase_draft',
             'workflow-purchase_approval',
@@ -89,7 +87,7 @@ class RoleController extends Controller
             'dashboard view recent activities',
             'dashboard view total documents',
         ];
-        foreach (array_merge($basePermissions, MasterDataRegistry::allPermissionNames()) as $perm) {
+        foreach (array_merge($basePermissions, MasterDataRegistry::allPermissionNames(), AuditPermissions::names()) as $perm) {
             Permission::firstOrCreate(['name' => $perm]);
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();
@@ -107,7 +105,39 @@ class RoleController extends Controller
             // Every master-data screen, for the permission matrix. Built from the
             // registry so a new master shows up there without touching the page.
             'masterData' => $this->masterDataMatrix(),
+            // The Compliance group of the sidebar: Internal Audit and what a role may do in it.
+            'compliance' => $this->complianceMatrix(),
         ]);
+    }
+
+    /**
+     * One entry per Compliance system (today Internal Audit), shaped like a master-data entry:
+     * the permission behind each action, and `manage`, the full-access one. Add a system here
+     * and it shows up in the matrix without touching the page.
+     *
+     * @return list<array{label: string, actions: list<array{action: string, permission: string, label?: string}>, manage: string}>
+     */
+    private function complianceMatrix(): array
+    {
+        $labels = [
+            'create' => 'Create audit (incl. follow-up)',
+            'edit' => 'Edit draft audit',
+            'delete' => 'Delete draft audit',
+            'complete' => 'Complete audit (locks the report)',
+            'reopen' => 'Reopen completed audit',
+            'cap' => 'Update corrective action plan (CAP)',
+        ];
+
+        return [[
+            'label' => 'Internal Audit',
+            'actions' => collect([...AuditPermissions::ACTIONS, 'cap'])
+                ->map(fn (string $action) => array_filter([
+                    'action' => $action,
+                    'permission' => AuditPermissions::permission($action),
+                    'label' => $labels[$action] ?? null,
+                ]))->values()->all(),
+            'manage' => AuditPermissions::MANAGE,
+        ]];
     }
 
     /**

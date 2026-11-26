@@ -20,7 +20,9 @@ import Pagination from '@/Components/MasterData/Pagination.vue';
 import ImportDialog from '@/Components/MasterData/ImportDialog.vue';
 import ImportResult from '@/Components/MasterData/ImportResult.vue';
 import ImportReview from '@/Components/MasterData/ImportReview.vue';
-import { Plus, Pencil, Trash2, Search, X, Download, FileSpreadsheet } from 'lucide-vue-next';
+import PayScalePanel from '@/Components/MasterData/PayScalePanel.vue';
+import DesignationCategoryPanel from '@/Components/MasterData/DesignationCategoryPanel.vue';
+import { Plus, Pencil, Trash2, Search, X, Download, FileSpreadsheet, RotateCcw } from 'lucide-vue-next';
 import { useSweetAlert } from '@/composables/useSweetAlert';
 
 const props = defineProps({
@@ -36,6 +38,13 @@ const props = defineProps({
     // Masters with Excel import only.
     importResult: { type: Object, default: null },
     importLimits: { type: Object, default: null },
+    // Grades & Pay Scales only: the salary formulas grades are paid by.
+    payScales: { type: Object, default: null },
+    // Designations only: the categories, each its own ladder: [{ id, name, color, designations_count }].
+    designationCategories: { type: Array, default: null },
+    // Showing the Trash instead of the list, and how many records are in it.
+    trash: { type: Boolean, default: false },
+    trashedCount: { type: Number, default: 0 },
 });
 
 // Full class strings so Tailwind can see them.
@@ -65,6 +74,16 @@ const formatNumber = (value) => {
 // ----- table -----------------------------------------------------------------
 
 const serverMode = computed(() => !!props.pagination);
+
+// A `calculations` column stands for one column per salary component (Basic, Gross, House Rent, ...)
+// that any formula has, so the table follows the formulas instead of a fixed list.
+const tableColumns = computed(() =>
+    props.definition.columns.flatMap((col) =>
+        col.type === 'calculations'
+            ? (props.payScales?.titles ?? []).map((title) => ({ key: `calc:${title.key}`, label: title.label, type: 'calculation', title: title.key }))
+            : [col],
+    ),
+);
 
 const search = ref(props.query?.search ?? '');
 const statusFilter = ref(props.query?.status ?? '');
@@ -128,12 +147,13 @@ const filteredRecords = computed(() => {
 // Where the list is now. Sent along with create/update/delete/import so the
 // redirect comes back to the same search and page.
 const listParams = computed(() => {
-    if (!serverMode.value) return {};
+    if (!serverMode.value) return props.trash ? { trash: 1 } : {};
     const params = {
         search: props.query.search || undefined,
         status: props.query.status || undefined,
         per_page: props.query.per_page,
         page: props.pagination.current_page > 1 ? props.pagination.current_page : undefined,
+        trash: props.trash ? 1 : undefined,
     };
     return Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== ''));
 });
@@ -143,6 +163,7 @@ const reload = (changes = {}) => {
         search: search.value.trim() || undefined,
         status: statusFilter.value || undefined,
         per_page: props.query.per_page,
+        trash: props.trash ? 1 : undefined,
         ...changes,
     };
     if (params.page === 1) delete params.page;
@@ -184,6 +205,69 @@ const exportUrl = computed(() => {
 });
 
 const number = (n) => Number(n ?? 0).toLocaleString();
+
+// ----- selecting rows (delete several at once, restore from the Trash) ---------------
+
+// Ticking rows needs the delete permission, and a master that has a Trash.
+const selectable = computed(() => !!(props.definition.trash && props.can.delete));
+
+const selected = ref([]);
+const working = ref(false);
+
+const allSelected = computed(() => filteredRecords.value.length > 0 && filteredRecords.value.every((r) => selected.value.includes(r.id)));
+const toggleAll = () => {
+    selected.value = allSelected.value ? [] : filteredRecords.value.map((r) => r.id);
+};
+const toggleRow = (id) => {
+    selected.value = selected.value.includes(id) ? selected.value.filter((x) => x !== id) : [...selected.value, id];
+};
+
+// A row that is filtered out, paged away or gone is no longer ticked.
+watch(filteredRecords, (rows) => {
+    const shown = new Set(rows.map((r) => r.id));
+    if (selected.value.some((id) => !shown.has(id))) selected.value = selected.value.filter((id) => shown.has(id));
+});
+
+const toggleTrash = () => {
+    selected.value = [];
+    router.get(route(`${props.definition.key}.index`), props.trash ? {} : { trash: 1 });
+};
+
+const phrase = (count) => `${number(count)} ${(count === 1 ? props.definition.singular : props.definition.label).toLowerCase()}`;
+
+// What to do with the ticked rows: `trash`, `restore` or `force` (delete for good). Asks first.
+const bulk = async (action, ids = selected.value) => {
+    if (!ids.length || working.value) return;
+    const { showTrashDeleteConfirm, showDeleteConfirm, showConfirm } = useSweetAlert();
+
+    let chosen = action;
+    if (action === 'trash') {
+        // From the list: to the Trash (can be undone) or gone for good.
+        const result = await showTrashDeleteConfirm(phrase(ids.length));
+        if (result.isConfirmed) chosen = 'trash';
+        else if (result.isDenied) chosen = 'force';
+        else return;
+    }
+    if (chosen === 'force' && action === 'force') {
+        const result = await showDeleteConfirm(`Delete ${escapeHtml(phrase(ids.length))} permanently?<br>This cannot be undone.`);
+        if (!result.isConfirmed) return;
+    }
+    if (chosen === 'restore') {
+        const result = await showConfirm(`Restore ${escapeHtml(phrase(ids.length))}?`, 'Restore');
+        if (!result.isConfirmed) return;
+    }
+
+    router.post(
+        route(`${props.definition.key}.bulk`, listParams.value),
+        { action: chosen, ids },
+        {
+            preserveScroll: true,
+            onStart: () => (working.value = true),
+            onFinish: () => (working.value = false),
+            onSuccess: () => (selected.value = []),
+        },
+    );
+};
 
 // ----- Excel import ----------------------------------------------------------
 
@@ -276,6 +360,14 @@ const submit = () => {
 const isVisible = (field) =>
     !field.show_if || Object.entries(field.show_if).every(([key, expected]) => form.value[key] === expected);
 
+// A field may adapt to another field's value (`variants` in MasterDataRegistry): a salary type's
+// Value reads "Percentage of basic salary (%)", limited to 100, for a % head, and "Amount" for a fixed one.
+const formFields = computed(() =>
+    props.definition.fields.map((field) =>
+        field.variants ? { ...field, ...(field.variants.options[form.value[field.variants.by]] ?? {}) } : field,
+    ),
+);
+
 const addRow = (field) => form.value[field.key].push({ ...field.item_default });
 const removeRow = (field, index) => form.value[field.key].splice(index, 1);
 
@@ -283,33 +375,6 @@ const repeaterTotal = (field) =>
     (form.value[field.key] || []).reduce((sum, row) => sum + (Number(row[field.total.key]) || 0), 0);
 
 const repeaterTotalOk = (field) => Math.abs(repeaterTotal(field) - field.total.target) < 0.001;
-
-/**
- * What the ticked options of a multiselect add up to at the minimum and maximum
- * basic (a grade's pay scale): one line per option, then the gross. Options that
- * are inactive are shown but not counted, as on the server.
- */
-const breakdown = (field) => {
-    const basics = ['min', 'max'].map((end) => Number(form.value[field.breakdown[end]]) || 0);
-    const chosen = (props.lookups[field.key] || []).filter((o) => form.value[field.key].includes(o.value));
-
-    const amount = (option, basic) =>
-        option.calculation === 'percent_of_basic' ? Math.round(basic * option.rate) / 100 : option.rate;
-
-    const lines = chosen.map((option) => ({
-        key: option.value,
-        label: option.label.replace(/ \(inactive\)$/, ''),
-        rate: option.calculation === 'percent_of_basic' ? `${formatNumber(option.rate)}% of basic` : `${formatNumber(option.rate)} fixed`,
-        active: option.active,
-        amounts: basics.map((basic) => amount(option, basic)),
-    }));
-
-    return {
-        basics,
-        lines,
-        gross: basics.map((basic, i) => basic + lines.filter((l) => l.active).reduce((sum, l) => sum + l.amounts[i], 0)),
-    };
-};
 
 const repeaterGrid = (field) => ({
     gridTemplateColumns: `repeat(${field.item_fields.length}, minmax(0, 1fr)) 2rem`,
@@ -324,12 +389,15 @@ const remove = async (record) => {
     const title = escapeHtml(record[props.definition.title_key]);
 
     const result = await showDeleteConfirm(
-        `Delete ${escapeHtml(props.definition.singular.toLowerCase())} "<b>${title}</b>"?<br>` +
-            'To keep it on record but stop using it, edit it and untick Active instead.',
+        `Move ${escapeHtml(props.definition.singular.toLowerCase())} "<b>${title}</b>" to the Trash?<br>` +
+            'You can restore it from the Trash later. To keep it but stop using it, edit it and untick Active instead.',
     );
 
     if (result.isConfirmed) {
-        router.delete(route(`${props.definition.key}.destroy`, { id: record.id, ...listParams.value }), { preserveScroll: true });
+        router.delete(route(`${props.definition.key}.destroy`, { id: record.id, ...listParams.value }), {
+            preserveScroll: true,
+            onSuccess: () => (selected.value = selected.value.filter((id) => id !== record.id)),
+        });
     }
 };
 
@@ -341,6 +409,7 @@ watch(
         search.value = props.query?.search ?? '';
         statusFilter.value = props.query?.status ?? '';
         filters.value = {};
+        selected.value = [];
         showModal.value = false;
         showImport.value = false;
         review.value = null;
@@ -361,8 +430,12 @@ watch(
                     <p class="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{{ definition.description }}</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
+                    <SecondaryButton v-if="definition.trash && can.delete" type="button" @click="toggleTrash">
+                        <Trash2 :size="16" class="mr-1.5" />
+                        {{ trash ? 'Back to List' : `Trash (${number(trashedCount)})` }}
+                    </SecondaryButton>
                     <a
-                        v-if="definition.import && can.export"
+                        v-if="definition.import && can.export && !trash"
                         :href="exportUrl"
                         class="inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-widest text-gray-700 shadow-sm transition duration-150 ease-in-out hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                         :title="`Download ${serverMode && (query.search || query.status) ? 'the filtered' : 'the full'} list as Excel`"
@@ -370,11 +443,11 @@ watch(
                         <Download :size="16" class="mr-1.5" />
                         Export
                     </a>
-                    <SecondaryButton v-if="definition.import && can.import" type="button" @click="showImport = true">
+                    <SecondaryButton v-if="definition.import && can.import && !trash" type="button" @click="showImport = true">
                         <FileSpreadsheet :size="16" class="mr-1.5" />
                         Import Excel
                     </SecondaryButton>
-                    <PrimaryButton v-if="can.create" type="button" @click="openCreate">
+                    <PrimaryButton v-if="can.create && !trash" type="button" @click="openCreate">
                         <Plus :size="16" class="mr-1.5" />
                         Add {{ definition.singular }}
                     </PrimaryButton>
@@ -405,8 +478,18 @@ watch(
                     @dismiss="lastImport = null"
                 />
 
+                <PayScalePanel v-if="payScales && !trash" :pay-scales="payScales" :can="can" />
+
+                <DesignationCategoryPanel
+                    v-if="designationCategories && !trash"
+                    :categories="designationCategories"
+                    :can="can"
+                    :filter="filters.designation_category_id"
+                    @filter="(id) => (filters.designation_category_id = id)"
+                />
+
                 <!-- Totals (server-paged masters) -->
-                <div v-if="stats" class="grid grid-cols-3 gap-4 px-4 sm:px-0">
+                <div v-if="stats && !trash" class="grid grid-cols-3 gap-4 px-4 sm:px-0">
                     <div class="rounded-lg bg-white p-4 shadow-sm dark:bg-gray-800">
                         <p class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Total {{ definition.label }}</p>
                         <p class="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100">{{ number(stats.total) }}</p>
@@ -452,7 +535,7 @@ watch(
                                     :aria-label="`Filter by ${fieldByKey(key)?.label}`"
                                     class="w-full md:w-48 px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                 >
-                                    <option value="">All {{ fieldByKey(key)?.label }}s</option>
+                                    <option value="">All {{ fieldByKey(key)?.plural ?? `${fieldByKey(key)?.label}s` }}</option>
                                     <option v-for="option in optionsFor(fieldByKey(key))" :key="option.value" :value="option.value">
                                         {{ option.label }}
                                     </option>
@@ -468,13 +551,57 @@ watch(
                             </div>
                         </div>
 
+                        <!-- The Trash: what is here is out of use, but kept -->
+                        <p
+                            v-if="trash"
+                            class="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200"
+                        >
+                            This is the Trash. These {{ definition.label.toLowerCase() }} are out of use but kept, with their codes. Restore them, or delete them permanently.
+                        </p>
+
+                        <!-- Ticked rows -->
+                        <div v-if="selectable" class="mb-4 flex flex-wrap items-center justify-between gap-2">
+                            <p class="text-sm text-gray-600 dark:text-gray-400">Selected: {{ selected.length }}</p>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <button
+                                    v-if="trash"
+                                    type="button"
+                                    :disabled="!selected.length || working"
+                                    @click="bulk('restore')"
+                                    class="inline-flex items-center rounded-md border border-green-300 px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-green-700 dark:text-green-400 dark:hover:bg-green-900/30"
+                                >
+                                    <RotateCcw :size="15" class="mr-1.5" />
+                                    Restore Selected
+                                </button>
+                                <button
+                                    type="button"
+                                    :disabled="!selected.length || working"
+                                    @click="bulk(trash ? 'force' : 'trash')"
+                                    class="inline-flex items-center rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/30"
+                                >
+                                    <Trash2 :size="15" class="mr-1.5" />
+                                    {{ trash ? 'Delete Permanently' : 'Delete Selected' }}
+                                </button>
+                            </div>
+                        </div>
+
                         <!-- Table -->
                         <div :class="['overflow-x-auto transition-opacity', loading ? 'opacity-50' : '']" :aria-busy="loading">
                             <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                                 <thead class="bg-gray-50 dark:bg-gray-900/50">
                                     <tr>
+                                        <th v-if="selectable" class="w-8 px-4 py-3 text-left">
+                                            <input
+                                                type="checkbox"
+                                                :checked="allSelected"
+                                                :disabled="!filteredRecords.length"
+                                                @change="toggleAll"
+                                                aria-label="Select all rows"
+                                                class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600"
+                                            />
+                                        </th>
                                         <th
-                                            v-for="col in definition.columns"
+                                            v-for="col in tableColumns"
                                             :key="col.key"
                                             class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider"
                                         >
@@ -487,8 +614,17 @@ watch(
                                 </thead>
                                 <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                     <tr v-for="record in filteredRecords" :key="record.id">
+                                        <td v-if="selectable" class="w-8 px-4 py-4 text-sm">
+                                            <input
+                                                type="checkbox"
+                                                :checked="selected.includes(record.id)"
+                                                @change="toggleRow(record.id)"
+                                                :aria-label="`Select ${record[definition.title_key]}`"
+                                                class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600"
+                                            />
+                                        </td>
                                         <td
-                                            v-for="col in definition.columns"
+                                            v-for="col in tableColumns"
                                             :key="col.key"
                                             :class="[
                                                 'px-6 py-4 text-sm',
@@ -531,49 +667,90 @@ watch(
                                                 <span v-else class="text-gray-400 dark:text-gray-500">—</span>
                                             </div>
 
-                                            <template v-else-if="col.type === 'range'">
-                                                {{ formatNumber(record[col.from]) }} – {{ formatNumber(record[col.to]) }}
-                                            </template>
+                                            <!-- A list of names worked out by the server -->
+                                            <div v-else-if="col.type === 'list'" class="flex flex-wrap gap-1" :title="(record[col.key] || []).join(', ')">
+                                                <template v-if="(record[col.key] || []).length">
+                                                    <span
+                                                        v-for="name in record[col.key].slice(0, 3)"
+                                                        :key="name"
+                                                        class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300"
+                                                    >
+                                                        {{ name }}
+                                                    </span>
+                                                    <span v-if="record[col.key].length > 3" class="text-xs text-gray-500 dark:text-gray-400 self-center">
+                                                        +{{ record[col.key].length - 3 }} more
+                                                    </span>
+                                                </template>
+                                                <span v-else class="text-gray-400 dark:text-gray-500">—</span>
+                                            </div>
 
+                                            <!-- A rate is a percentage for one kind of record and an amount for another: only the % ones get a % -->
                                             <template v-else-if="col.type === 'rate'">
                                                 {{ formatNumber(record[col.key]) }}{{ record[col.by] === col.percent ? '%' : '' }}
                                             </template>
 
                                             <template v-else-if="col.type === 'number'">{{ formatNumber(record[col.key]) }}</template>
 
+                                            <!-- One salary component of the grade's formula (Basic, Gross, ...); blank when it has none or it cannot be worked out -->
+                                            <template v-else-if="col.type === 'calculation'">{{ formatNumber(record.calculations?.[col.title]) }}</template>
+
                                             <template v-else>{{ record[col.key] || '—' }}</template>
                                         </td>
 
                                         <td v-if="hasActions" class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                             <div class="flex justify-end gap-3">
-                                                <button
-                                                    v-if="can.edit"
-                                                    type="button"
-                                                    @click="openEdit(record)"
-                                                    class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300"
-                                                    :title="`Edit ${definition.singular}`"
-                                                >
-                                                    <Pencil :size="16" />
-                                                </button>
-                                                <button
-                                                    v-if="can.delete"
-                                                    type="button"
-                                                    @click="remove(record)"
-                                                    class="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300"
-                                                    :title="`Delete ${definition.singular}`"
-                                                >
-                                                    <Trash2 :size="16" />
-                                                </button>
+                                                <template v-if="trash">
+                                                    <button
+                                                        v-if="can.delete"
+                                                        type="button"
+                                                        @click="bulk('restore', [record.id])"
+                                                        class="text-green-600 dark:text-green-400 hover:text-green-900 dark:hover:text-green-300"
+                                                        :title="`Restore ${definition.singular}`"
+                                                    >
+                                                        <RotateCcw :size="16" />
+                                                    </button>
+                                                    <button
+                                                        v-if="can.delete"
+                                                        type="button"
+                                                        @click="bulk('force', [record.id])"
+                                                        class="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300"
+                                                        :title="`Delete ${definition.singular} permanently`"
+                                                    >
+                                                        <Trash2 :size="16" />
+                                                    </button>
+                                                </template>
+                                                <template v-else>
+                                                    <button
+                                                        v-if="can.edit"
+                                                        type="button"
+                                                        @click="openEdit(record)"
+                                                        class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300"
+                                                        :title="`Edit ${definition.singular}`"
+                                                    >
+                                                        <Pencil :size="16" />
+                                                    </button>
+                                                    <button
+                                                        v-if="can.delete"
+                                                        type="button"
+                                                        @click="remove(record)"
+                                                        class="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300"
+                                                        :title="definition.trash ? `Move ${definition.singular} to Trash` : `Delete ${definition.singular}`"
+                                                    >
+                                                        <Trash2 :size="16" />
+                                                    </button>
+                                                </template>
                                             </div>
                                         </td>
                                     </tr>
 
                                     <tr v-if="filteredRecords.length === 0">
-                                        <td :colspan="definition.columns.length + (hasActions ? 1 : 0)" class="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                                        <td :colspan="tableColumns.length + (hasActions ? 1 : 0) + (selectable ? 1 : 0)" class="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
                                             {{
-                                                (serverMode ? stats?.total === 0 : records.length === 0)
-                                                    ? `No ${definition.label.toLowerCase()} yet.`
-                                                    : 'Nothing matches your search.'
+                                                trash
+                                                    ? records.length === 0 && !search.trim() && !statusFilter ? 'The Trash is empty.' : 'Nothing matches your search.'
+                                                    : (serverMode ? stats?.total === 0 : records.length === 0)
+                                                      ? `No ${definition.label.toLowerCase()} yet.`
+                                                      : 'Nothing matches your search.'
                                             }}
                                         </td>
                                     </tr>
@@ -617,7 +794,7 @@ watch(
                 </h3>
 
                 <div class="mt-5 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
-                    <template v-for="field in definition.fields" :key="field.key">
+                    <template v-for="field in formFields" :key="field.key">
                         <div v-if="isVisible(field)" :class="field.full ? 'md:col-span-2' : ''">
                             <!-- Checkbox -->
                             <template v-if="field.type === 'boolean'">
@@ -694,45 +871,6 @@ watch(
                                     <p v-if="!(lookups[field.key] || []).length" class="text-sm text-gray-500 dark:text-gray-400 sm:col-span-2">
                                         Nothing to choose from yet.
                                     </p>
-                                </div>
-
-                                <!-- What the ticked options add up to (a grade's pay scale) -->
-                                <div
-                                    v-if="field.type === 'multiselect' && field.breakdown && breakdown(field).lines.length"
-                                    class="mt-3 overflow-hidden rounded-md border border-gray-200 dark:border-gray-700"
-                                >
-                                    <table class="min-w-full text-sm">
-                                        <thead class="bg-gray-50 text-xs uppercase tracking-wider text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
-                                            <tr>
-                                                <th class="px-3 py-2 text-left font-medium">Pay scale</th>
-                                                <th class="px-3 py-2 text-left font-medium">Rate</th>
-                                                <th class="px-3 py-2 text-right font-medium">At minimum basic</th>
-                                                <th class="px-3 py-2 text-right font-medium">At maximum basic</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
-                                            <tr>
-                                                <td class="px-3 py-1.5 text-gray-700 dark:text-gray-300">Basic salary</td>
-                                                <td class="px-3 py-1.5 text-gray-400">—</td>
-                                                <td class="px-3 py-1.5 text-right tabular-nums">{{ formatNumber(breakdown(field).basics[0]) }}</td>
-                                                <td class="px-3 py-1.5 text-right tabular-nums">{{ formatNumber(breakdown(field).basics[1]) }}</td>
-                                            </tr>
-                                            <tr v-for="line in breakdown(field).lines" :key="line.key" :class="line.active ? '' : 'text-gray-400 line-through dark:text-gray-500'">
-                                                <td class="px-3 py-1.5">
-                                                    {{ line.label }}
-                                                    <span v-if="!line.active" class="no-underline text-xs">(inactive — not counted)</span>
-                                                </td>
-                                                <td class="px-3 py-1.5">{{ line.rate }}</td>
-                                                <td class="px-3 py-1.5 text-right tabular-nums">{{ formatNumber(line.amounts[0]) }}</td>
-                                                <td class="px-3 py-1.5 text-right tabular-nums">{{ formatNumber(line.amounts[1]) }}</td>
-                                            </tr>
-                                            <tr class="bg-gray-50 font-semibold dark:bg-gray-900/50">
-                                                <td class="px-3 py-2" colspan="2">Gross salary</td>
-                                                <td class="px-3 py-2 text-right tabular-nums">{{ formatNumber(breakdown(field).gross[0]) }}</td>
-                                                <td class="px-3 py-2 text-right tabular-nums">{{ formatNumber(breakdown(field).gross[1]) }}</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
                                 </div>
 
                                 <!-- Editable list of rows -->

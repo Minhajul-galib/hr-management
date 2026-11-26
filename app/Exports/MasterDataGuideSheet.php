@@ -5,6 +5,7 @@ namespace App\Exports;
 use App\Support\MasterData\MasterDataImporter;
 use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\WithColumnWidths;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
 use Maatwebsite\Excel\Concerns\WithStyles;
 use Maatwebsite\Excel\Concerns\WithTitle;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
@@ -12,7 +13,7 @@ use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
 /** Second sheet: how to fill in the first one, built from the master's fields (not imported). */
-class MasterDataGuideSheet implements FromArray, WithColumnWidths, WithStyles, WithTitle
+class MasterDataGuideSheet implements FromArray, WithColumnWidths, WithStrictNullComparison, WithStyles, WithTitle
 {
     /** Row number of the column table's heading, for styling. */
     private int $columnsHeadRow = 0;

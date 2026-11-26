@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Models\Designation;
-use App\Models\SalaryType;
 use App\Models\Unit;
 use App\Models\User;
 use App\Support\MasterData\MasterDataRegistry;
@@ -54,17 +53,15 @@ class EditorRoleTest extends TestCase
     {
         return [
             'departments' => ['code' => '900', 'name' => 'Logistics', 'short_name' => 'LOG', 'is_active' => true],
-            'designations' => ['code' => '201', 'title' => 'General Manager', 'serial' => 3, 'is_active' => true],
-            'salary-types' => ['code' => '120', 'name' => 'House Rent', 'calculation' => 'percent_of_basic', 'value' => 50, 'is_active' => true],
-            'grades' => ['code' => '301', 'name' => 'Grade 1', 'basic_min' => 10000, 'basic_max' => 20000,
-                'salary_type_ids' => [SalaryType::create(['code' => '652', 'name' => 'Medical', 'calculation' => 'percent_of_basic', 'value' => 10])->id], 'is_active' => true],
+            'designations' => ['designation_category_id' => $this->designationCategory()->id, 'code' => '201', 'title' => 'General Manager', 'serial' => 3, 'is_active' => true],
+            'grades' => ['code' => '301', 'type' => 'group_male', 'pay_scale_id' => \App\Models\PayScale::firstWhere('name', 'Group')->id, 'is_active' => true],
             'leave-types' => ['code' => '1001', 'name' => 'Casual Leave', 'is_paid' => true, 'entitlement_days' => 10,
                 'accrual' => 'yearly', 'carry_forward' => false, 'attachment_required' => false, 'is_active' => true],
             'offence-types' => ['code' => '501', 'name' => 'Unauthorised absence', 'severity' => 'minor', 'is_active' => true],
             'acr-templates' => ['code' => '701', 'name' => 'Officer ACR',
                 'criteria' => [['name' => 'Integrity', 'weight' => 60], ['name' => 'Punctuality', 'weight' => 40]],
                 'rating_scale' => [['label' => 'Poor', 'min_score' => 0, 'max_score' => 49.99], ['label' => 'Good', 'min_score' => 50, 'max_score' => 100]],
-                'designation_ids' => [Designation::create(['code' => 'MD', 'title' => 'Managing Director', 'serial' => 1])->id],
+                'designation_ids' => [Designation::create(['designation_category_id' => $this->designationCategory()->id, 'code' => 'MD', 'title' => 'Managing Director', 'serial' => 1])->id],
                 'is_active' => true],
             'document-types' => ['code' => '603', 'name' => 'National ID', 'module' => 'employee_profile', 'is_mandatory' => true, 'is_active' => true],
         ];
@@ -163,7 +160,8 @@ class EditorRoleTest extends TestCase
             $record = $model::query()->where($title, $payload[$title])->first();
             $this->assertNotNull($record, "{$key}: record was not created");
 
-            $changed = $payload[$title].' (edited)';
+            // A code allows only numbers and small letters, so a master titled by its code gets a digit instead.
+            $changed = $title === 'code' ? $payload[$title].'9' : $payload[$title].' (edited)';
             $this->actingAs($editor)->put(route("{$key}.update", $record), [$title => $changed] + $payload)
                 ->assertSessionHasNoErrors();
             $this->assertSame($changed, $record->fresh()->{$title}, "{$key}: edit was not saved");

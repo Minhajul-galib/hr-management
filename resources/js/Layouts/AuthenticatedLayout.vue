@@ -33,7 +33,6 @@ import {
     CalendarDays,
     ClipboardCheck,
     Briefcase,
-    Percent,
     Layers,
     CalendarOff,
     ShieldAlert,
@@ -201,7 +200,7 @@ const menuGroups = [
     {
         name: 'Compliance',
         items: [
-            { name: 'Internal Audit', routeName: 'audits.index', permission: ['view audits', 'manage audits', 'update audit cap'], icon: ClipboardCheck },
+            { name: 'Internal Audit', routeName: 'audits.index', permission: [...anyOn('audits', ['view', 'create', 'edit', 'delete', 'complete', 'reopen']), 'update audit cap'], icon: ClipboardCheck },
         ]
     },
     {
@@ -210,7 +209,6 @@ const menuGroups = [
             { name: 'Departments', routeName: 'departments.index', permission: anyOn('departments'), icon: Building },
             { name: 'Units', routeName: 'units.index', permission: anyOn('units', ['view', 'create', 'edit', 'delete']), icon: Package },
             { name: 'Designations', routeName: 'designations.index', permission: anyOn('designations'), icon: Briefcase },
-            { name: 'Salary Types', routeName: 'salary-types.index', permission: anyOn('salary types'), icon: Percent },
             { name: 'Grades & Pay Scales', routeName: 'grades.index', permission: anyOn('grades'), icon: Layers },
             { name: 'Leave Types', routeName: 'leave-types.index', permission: anyOn('leave types'), icon: CalendarOff },
             { name: 'Offence Types', routeName: 'offence-types.index', permission: anyOn('offence types'), icon: ShieldAlert },

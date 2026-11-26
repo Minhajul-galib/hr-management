@@ -3,34 +3,58 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * A pay grade: a code (the grade number, such as 400), its type (the Group companies or VBL, and
+ * male employees or female employees and those aged 65 or over; the latter will decide tax) and
+ * the salary formula it is paid by.
+ *
+ * It carries no pay of its own. Its salary (Basic, Gross, House Rent, ...) comes from its
+ * formula's components (see PayScale), so changing a formula changes every grade paid by it.
+ */
 class Grade extends Model
 {
-    protected $fillable = ['code', 'name', 'basic_min', 'basic_max', 'is_active'];
+    use SoftDeletes;
+
+    public const GROUP_MALE = 'group_male';
+
+    public const GROUP_FEMALE_65 = 'group_female_65';
+
+    public const VBL_MALE = 'vbl_male';
+
+    public const VBL_FEMALE_65 = 'vbl_female_65';
+
+    public const TYPES = [self::GROUP_MALE, self::GROUP_FEMALE_65, self::VBL_MALE, self::VBL_FEMALE_65];
+
+    protected $fillable = ['code', 'type', 'pay_scale_id', 'is_active'];
 
     protected $casts = [
-        'basic_min' => 'decimal:2',
-        'basic_max' => 'decimal:2',
         'is_active' => 'boolean',
     ];
 
-    /** The salary heads paid on top of basic in this grade. */
-    public function salaryTypes(): BelongsToMany
+    /** The salary formula this grade is paid by. */
+    public function payScale(): BelongsTo
     {
-        return $this->belongsToMany(SalaryType::class, 'grade_salary_type');
+        return $this->belongsTo(PayScale::class);
     }
 
     /**
-     * Basic plus every active salary type at the given basic. An inactive
-     * salary type is one that is no longer paid, so it does not count.
+     * This grade's salary: each component of its formula (Basic, Gross, ...) in order, with the
+     * amount for this grade (null when it cannot be worked out, e.g. the grade is not a number).
+     *
+     * @return list<array{title: string, value: float|null}>
      */
-    public function grossAt(string|float|int|null $basic): float
+    public function calculations(): array
     {
-        $extra = $this->salaryTypes
-            ->where('is_active', true)
-            ->sum(fn (SalaryType $type) => $type->amountFor($basic));
+        $scale = $this->payScale;
+        if (! $scale) {
+            return [];
+        }
 
-        return round((float) $basic + $extra, 2);
+        $values = $scale->calculate($this->code);
+
+        return $scale->lines->map(fn (PayScaleLine $line) => ['title' => $line->title, 'value' => $values[$line->id] ?? null])->all();
     }
 }

@@ -5,11 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\Unit;
 use App\Models\User;
 use App\Support\MasterData\Code;
+use App\Support\MasterData\MasterDataImporter;
+use App\Support\MasterData\MasterDataRegistry;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
-use Maatwebsite\Excel\Facades\Excel;
-use App\Imports\UnitsImport;
 
 class UnitController extends Controller
 {
@@ -61,6 +60,10 @@ class UnitController extends Controller
             'showTrashed'     => $showTrashed,
             'departments'     => $departments,
             'unassignedUsers' => $unassignedUsers,
+            // The Excel import is the same reviewed import the other masters use (see MasterDataController).
+            'importDefinition' => $this->importDefinition(),
+            'importLimits'    => MasterDataImporter::limits(),
+            'importResult'    => session('import_result'), // flashed by the import; only on the request right after it
         ]);
     }
 
@@ -78,18 +81,9 @@ class UnitController extends Controller
 
     public function store(Request $request)
     {
-        $request->merge(['unit_code' => Code::normalise($request->input('unit_code'))]);
+        $request->merge(['unit_code' => Code::normalise($request->input('unit_code'), keepCase: true)]);
 
-        $validated = $request->validate([
-            'unit_code' => ['required', 'string', 'max:'.Code::MAX_LENGTH, 'regex:'.Code::PATTERN, 'unique:units,unit_code'],
-            'short_form' => 'nullable|string|max:50',
-            'name' => 'required|string|max:255',
-            'location' => 'nullable|string|max:255',
-            'contact_person' => 'nullable|string|max:255',
-            'phone_number' => 'nullable|string|max:20',
-            'email' => 'nullable|email|max:255',
-            'is_active' => 'boolean',
-        ], ['unit_code.regex' => Code::MESSAGE]);
+        $validated = $request->validate(Unit::rules(), ['unit_code.regex' => Code::UNIT_MESSAGE]);
 
         $validated['created_by'] = auth()->id();
 
@@ -107,18 +101,9 @@ class UnitController extends Controller
 
     public function update(Request $request, Unit $unit)
     {
-        $request->merge(['unit_code' => Code::normalise($request->input('unit_code'))]);
+        $request->merge(['unit_code' => Code::normalise($request->input('unit_code'), keepCase: true)]);
 
-        $validated = $request->validate([
-            'unit_code' => ['required', 'string', 'max:'.Code::MAX_LENGTH, 'regex:'.Code::PATTERN, 'unique:units,unit_code,'.$unit->id],
-            'short_form' => 'nullable|string|max:50',
-            'name' => 'required|string|max:255',
-            'location' => 'nullable|string|max:255',
-            'contact_person' => 'nullable|string|max:255',
-            'phone_number' => 'nullable|string|max:20',
-            'email' => 'nullable|email|max:255',
-            'is_active' => 'boolean',
-        ], ['unit_code.regex' => Code::MESSAGE]);
+        $validated = $request->validate(Unit::rules($unit->id), ['unit_code.regex' => Code::UNIT_MESSAGE]);
 
         $unit->update($validated);
 
@@ -145,83 +130,16 @@ class UnitController extends Controller
         return back()->with('success', 'Unit deleted permanently.');
     }
 
-    public function import(Request $request)
+    /** What the import dialog and review grid need to know about the units sheet. @return array<string, mixed> */
+    private function importDefinition(): array
     {
-        $request->validate([
-            'file' => 'required|file|mimetypes:text/csv,text/plain,application/csv,text/comma-separated-values,application/excel,application/vnd.ms-excel,application/vnd.msexcel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet|max:2048',
-        ]);
+        $definition = MasterDataRegistry::find('units');
 
-        try {
-            Excel::import(new UnitsImport, $request->file('file'));
-            return back()->with('success', 'Units imported successfully.');
-        } catch (\Exception $e) {
-            return back()->with('error', 'Import failed: ' . $e->getMessage());
-        }
-    }
-
-    public function downloadTemplate()
-    {
-        $headers = [
-            'unit_code',
-            'short_form',
-            'name',
-            'location',
-            'contact_person',
-            'phone_number',
-            'email',
-            'is_active',
+        return [
+            'key' => 'units',
+            'label' => $definition['label'],
+            'singular' => $definition['singular'],
+            'import' => MasterDataImporter::describe($definition),
         ];
-
-        $sampleRows = [
-            [
-                '101',
-                'HO',
-                'Head Office',
-                'Dhaka, Bangladesh',
-                'John Doe',
-                '01712345678',
-                'headoffice@example.com',
-                '1',
-            ],
-            [
-                '102',
-                'CTG',
-                'Branch Office - Chittagong',
-                'Chittagong, Bangladesh',
-                'Jane Smith',
-                '01798765432',
-                'ctg@example.com',
-                '1',
-            ],
-            [
-                '103',
-                'GZP',
-                'Warehouse - Gazipur',
-                'Gazipur, Bangladesh',
-                'Mike Johnson',
-                '01612345678',
-                'warehouse@example.com',
-                '1',
-            ],
-        ];
-
-        $filename = 'unit_import_template.csv';
-
-        $callback = function () use ($headers, $sampleRows) {
-            $out = fopen('php://output', 'w');
-            // BOM for Excel compatibility
-            fwrite($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
-            fputcsv($out, $headers);
-
-            foreach ($sampleRows as $row) {
-                fputcsv($out, $row);
-            }
-
-            fclose($out);
-        };
-
-        return response()->streamDownload($callback, $filename, [
-            'Content-Type' => 'text/csv; charset=UTF-8',
-        ]);
     }
 }

@@ -7,6 +7,7 @@ use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\WithColumnWidths;
 use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithHeadings;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
 use Maatwebsite\Excel\Concerns\WithStyles;
 use Maatwebsite\Excel\Concerns\WithTitle;
 use Maatwebsite\Excel\Events\AfterSheet;
@@ -17,8 +18,13 @@ use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-/** The sheet the import reads: one heading row, then one record per row. */
-class MasterDataSheet implements FromArray, WithColumnWidths, WithEvents, WithHeadings, WithStyles, WithTitle
+/**
+ * The sheet the import reads: one heading row, then one record per row.
+ *
+ * WithStrictNullComparison: without it Laravel Excel writes a number 0 as an empty cell, which the
+ * import then reads as "left blank" (a leave type's 0 days, a designation's serial 0, a salary type's value 0).
+ */
+class MasterDataSheet implements FromArray, WithColumnWidths, WithEvents, WithHeadings, WithStrictNullComparison, WithStyles, WithTitle
 {
     /** Excel refuses an in-cell drop-down list longer than this. */
     private const MAX_LIST_LENGTH = 250;
@@ -93,8 +99,9 @@ class MasterDataSheet implements FromArray, WithColumnWidths, WithEvents, WithHe
                     $column = Coordinate::stringFromColumnIndex($i + 1);
                     $range = "{$column}2:{$column}{$lastRow}";
 
-                    // Codes stay text, so Excel doesn't turn "001" into 1.
-                    if (! empty($field['uppercase']) || ! empty($field['lowercase']) || isset($field['lookup'])) {
+                    // Codes (and other digits that are not numbers, like a phone number) stay text,
+                    // so Excel doesn't turn "001" into 1.
+                    if (! empty($field['uppercase']) || ! empty($field['lowercase']) || ! empty($field['text']) || isset($field['lookup'])) {
                         $sheet->getStyle($range)->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
                     }
 

@@ -22,13 +22,22 @@ final class CodeSuggester
     /** @var array<string, true> scope key + prefix already read from the database */
     private array $loaded = [];
 
-    /** @param  class-string<\Illuminate\Database\Eloquent\Model>  $model */
-    public function __construct(private readonly string $model, private readonly string $column = 'code') {}
+    /**
+     * @param  class-string<\Illuminate\Database\Eloquent\Model>  $model
+     * @param  bool  $unitFormat  codes like F02-PDD (see Code::UNIT_PATTERN) instead of numbers and small letters
+     *
+     * Codes are compared ignoring case, so F02-PDD and f02-pdd are the same code.
+     */
+    public function __construct(
+        private readonly string $model,
+        private readonly string $column = 'code',
+        private readonly bool $unitFormat = false,
+    ) {}
 
     /** @param  array<string, mixed>  $scope */
     public function claim(string $code, array $scope = []): void
     {
-        $this->taken[$this->scopeKey($scope)][$code] = true;
+        $this->taken[$this->scopeKey($scope)][strtolower($code)] = true;
     }
 
     /**
@@ -39,7 +48,7 @@ final class CodeSuggester
      */
     public function free(string $code, array $scope = []): ?string
     {
-        $code = self::clean($code);
+        $code = $this->tidy($code);
         if ($code === '') {
             return null;
         }
@@ -49,7 +58,7 @@ final class CodeSuggester
         }
 
         $taken = $this->codesStartingWith($code, $scope);
-        if (! isset($taken[$code])) {
+        if (! isset($taken[strtolower($code)])) {
             $this->claim($code, $scope);
 
             return $code;
@@ -65,7 +74,7 @@ final class CodeSuggester
      */
     public function next(string $code, array $scope = []): ?string
     {
-        $code = self::clean($code);
+        $code = $this->tidy($code);
         if ($code === '') {
             return null;
         }
@@ -77,7 +86,7 @@ final class CodeSuggester
         }
 
         $taken = $this->codesStartingWith($prefix, $scope);
-        $pattern = '/^'.preg_quote($prefix, '/').'(\d+)$/';
+        $pattern = '/^'.preg_quote($prefix, '/').'(\d+)$/i';
         foreach (array_keys($taken) as $existing) {
             if (preg_match($pattern, (string) $existing, $n)) {
                 $highest = max($highest, (int) $n[1]);
@@ -87,7 +96,7 @@ final class CodeSuggester
         $number = $highest + 1;
         do {
             $candidate = $prefix.str_pad((string) $number++, $width, '0', STR_PAD_LEFT);
-        } while (isset($taken[$candidate]));
+        } while (isset($taken[strtolower($candidate)]));
 
         if (strlen($candidate) > Code::MAX_LENGTH) {
             return null;
@@ -104,6 +113,12 @@ final class CodeSuggester
         return Code::clean($code);
     }
 
+    /** The code made valid in this suggester's format. */
+    private function tidy(string $code): string
+    {
+        return $this->unitFormat ? Code::cleanUnit($code) : self::clean($code);
+    }
+
     /**
      * Every taken code in the scope, after reading the saved ones that start with $prefix.
      *
@@ -115,16 +130,21 @@ final class CodeSuggester
         $key = $this->scopeKey($scope);
         $this->taken[$key] ??= [];
 
+        $prefix = strtolower($prefix);
+
         if (! isset($this->loaded[$key."\x1F".$prefix])) {
             $this->loaded[$key."\x1F".$prefix] = true;
 
-            $saved = $this->model::query()
-                ->where($scope)
-                ->where($this->column, 'like', addcslashes($prefix, '\\%_').'%')
+            $query = $this->model::query()->where($scope);
+            if (in_array(\Illuminate\Database\Eloquent\SoftDeletes::class, class_uses_recursive($this->model), true)) {
+                $query->withTrashed(); // a code in the Trash is still taken
+            }
+            $saved = $query
+                ->whereRaw('LOWER('.$query->getQuery()->getGrammar()->wrap($this->column).') like ?', [addcslashes($prefix, '\\%_').'%'])
                 ->pluck($this->column);
 
             foreach ($saved as $code) {
-                $this->taken[$key][(string) $code] = true;
+                $this->taken[$key][strtolower((string) $code)] = true;
             }
         }
 

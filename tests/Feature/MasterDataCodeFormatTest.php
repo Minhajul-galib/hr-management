@@ -88,23 +88,26 @@ class MasterDataCodeFormatTest extends TestCase
 
     // ----- Units ---------------------------------------------------------------------
 
-    public function test_a_unit_code_follows_the_same_rule_and_is_saved_in_small_letters(): void
+    public function test_a_unit_code_may_have_letters_numbers_and_hyphens_and_keeps_its_capitals(): void
     {
         $user = $this->manageUnits();
 
-        $this->actingAs($user)->post(route('units.store'), ['unit_code' => ' U1001 ', 'name' => 'Factory One'])
-            ->assertSessionHasNoErrors();
-        $this->assertDatabaseHas('units', ['unit_code' => 'u1001']);
+        foreach (['F01-KITH', 'F02-PDD', ' F03-CAL ', 'u1001', '2002'] as $good) {
+            $this->actingAs($user)->post(route('units.store'), ['unit_code' => $good, 'name' => 'Unit '.trim($good)])
+                ->assertSessionHasNoErrors();
+        }
+        $this->assertSame(['2002', 'F01-KITH', 'F02-PDD', 'F03-CAL', 'u1001'], Unit::orderBy('unit_code')->pluck('unit_code')->all());
 
-        foreach (['UNIT', 'u-1001', 'u 1', 'unit_1'] as $bad) {
+        // No number, a stray symbol, a space inside, or a hyphen at an end or doubled.
+        foreach (['UNIT', 'F-PDD', 'u_1001', 'u 1', '-F01', 'F01-', 'F01--PDD', 'F01/PDD'] as $bad) {
             $this->actingAs($user)->post(route('units.store'), ['unit_code' => $bad, 'name' => 'Bad'])
                 ->assertSessionHasErrors('unit_code');
         }
 
-        // The same code in capitals is the same code.
-        $this->actingAs($user)->post(route('units.store'), ['unit_code' => 'U1001', 'name' => 'Duplicate'])
+        // The same code in other letters is the same code.
+        $this->actingAs($user)->post(route('units.store'), ['unit_code' => 'f02-pdd', 'name' => 'Duplicate'])
             ->assertSessionHasErrors('unit_code');
-        $this->assertSame(1, Unit::count());
+        $this->assertSame(5, Unit::count());
     }
 
     public function test_a_unit_keeps_its_own_code_when_edited_and_cannot_take_another_units(): void
@@ -117,36 +120,43 @@ class MasterDataCodeFormatTest extends TestCase
             ->assertSessionHasNoErrors();
         $this->actingAs($user)->put(route('units.update', $one), ['unit_code' => '102', 'name' => 'One'])
             ->assertSessionHasErrors('unit_code');
-        $this->actingAs($user)->put(route('units.update', $one), ['unit_code' => 'Unit-1', 'name' => 'One'])
+        $this->actingAs($user)->put(route('units.update', $one), ['unit_code' => 'Unit_1', 'name' => 'One'])
             ->assertSessionHasErrors('unit_code');
+        $this->actingAs($user)->put(route('units.update', $one), ['unit_code' => 'F02-PDD', 'name' => 'One renamed'])
+            ->assertSessionHasNoErrors();
 
         $this->assertSame('One renamed', $one->fresh()->name);
+        $this->assertSame('F02-PDD', $one->fresh()->unit_code);
     }
 
-    public function test_units_import_lowercases_codes_reads_numbers_and_rejects_bad_ones(): void
+    public function test_a_units_file_imported_as_it_is_accepts_codes_like_f02_pdd_reads_numbers_and_skips_bad_ones(): void
     {
         $csv = "unit_code,short_form,name,location,contact_person,phone_number,email,is_active\n"
-            ."U2001,HO,Head Office,Dhaka,,,,1\n"
+            ."F01-KITH,KITH,Kith,Dhaka,,,,1\n"
+            ."F02-PDD,PDD,Pdd,,,,,1\n"
+            ."F03-CAL,CAL,Cal,,,,,1\n"
+            ."F04-DFL,DFL,Dfl,,,,,1\n"
+            ."F05-CTAL,CTAL,Ctal,,,,,1\n"
+            ."F06-VBL,VBL,Vbl,,,,,1\n"
+            ."F07-CCML,CCML,Ccml,,,,,1\n"
             ."2002,CTG,Chittagong,,,,,1\n";
 
         $this->actingAs($this->manageUnits())
             ->post(route('units.import'), ['file' => UploadedFile::fake()->createWithContent('units.csv', $csv)])
             ->assertSessionHas('success');
 
-        $this->assertSame(['2002', 'u2001'], Unit::orderBy('unit_code')->pluck('unit_code')->all());
+        $this->assertSame(
+            ['2002', 'F01-KITH', 'F02-PDD', 'F03-CAL', 'F04-DFL', 'F05-CTAL', 'F06-VBL', 'F07-CCML'],
+            Unit::orderBy('unit_code')->pluck('unit_code')->all()
+        );
 
-        $bad = "unit_code,name\nUNIT-1,Bad\n";
+        // Bad codes are skipped; f02-pdd is F02-PDD again (codes ignore the case of letters), so it updates that unit.
+        $bad = "unit_code,name\nUNIT_1,Bad\nF08-,Bad too\nf02-pdd,Same code\n";
         $this->actingAs($this->manageUnits())
             ->post(route('units.import'), ['file' => UploadedFile::fake()->createWithContent('bad.csv', $bad)])
-            ->assertSessionHas('error');
-        $this->assertSame(2, Unit::count());
-    }
-
-    public function test_the_units_template_shows_numeric_codes(): void
-    {
-        $response = $this->actingAs($this->manageUnits())->get(route('units.template'))->assertOk();
-
-        $this->assertStringContainsString("\n101,HO,", $response->streamedContent());
+            ->assertSessionHas('import_result', fn ($r) => $r['error_count'] === 2 && $r['updated_count'] === 1 && $r['created_count'] === 0);
+        $this->assertSame(8, Unit::count());
+        $this->assertSame('Same code', Unit::whereRaw('LOWER(unit_code) = ?', ['f02-pdd'])->value('name'));
     }
 
     // ----- the migration that converted codes saved under the old rule ----------------
@@ -159,7 +169,7 @@ class MasterDataCodeFormatTest extends TestCase
     public function test_old_codes_are_converted_in_every_master_table(): void
     {
         DB::table('departments')->insert(['name' => 'Human Resources', 'short_name' => 'HR', 'code' => 'D001', 'is_active' => true]);
-        DB::table('designations')->insert(['code' => 'SR-EXEC', 'title' => 'Senior Executive', 'serial' => 1, 'is_active' => true]);
+        DB::table('designations')->insert(['designation_category_id' => $this->designationCategory()->id, 'code' => 'SR-EXEC', 'title' => 'Senior Executive', 'serial' => 1, 'is_active' => true]);
         DB::table('leave_types')->insert(['code' => 'CL', 'name' => 'Casual Leave']);
         DB::table('offence_types')->insert(['code' => 'THEFT', 'name' => 'Theft', 'severity' => 'gross']);
         DB::table('document_types')->insert(['code' => 'NATIONAL_ID', 'name' => 'National ID', 'module' => 'employee_profile']);

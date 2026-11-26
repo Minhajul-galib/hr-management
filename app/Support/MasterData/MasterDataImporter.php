@@ -4,6 +4,7 @@ namespace App\Support\MasterData;
 
 use App\Exports\MasterDataExport;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -42,6 +43,9 @@ final class MasterDataImporter
 {
     public const MAX_ROWS = 2000;
 
+    /** Largest upload accepted, in kilobytes. */
+    public const MAX_UPLOAD_KB = 5120;
+
     private const HEADING_SEARCH_ROWS = 10;
 
     private const IMPORTABLE = ['text', 'textarea', 'number', 'boolean', 'select', 'multiselect'];
@@ -62,6 +66,9 @@ final class MasterDataImporter
     /** The match field that holds a code, when there is one. */
     private readonly ?string $codeKey;
 
+    /** Codes are written like F02-PDD (a unit's), not as numbers and small letters. */
+    private readonly bool $unitCodes;
+
     /** @var array<string, list<array{id: int, code: string, label: string, active: bool}>> lookup field => targets */
     private array $targets = [];
 
@@ -73,7 +80,9 @@ final class MasterDataImporter
         $this->columns = self::columns($definition);
         $this->fields = array_column($this->columns, null, 'key');
         $this->match = self::matchKeys($definition);
-        $this->codeKey = in_array('code', $this->match, true) ? 'code' : null;
+        $code = self::codeKeyOf($definition);
+        $this->codeKey = in_array($code, $this->match, true) ? $code : null;
+        $this->unitCodes = ($definition['import']['code_format'] ?? null) === 'unit';
     }
 
     // ----- description of the sheet ----------------------------------------------
@@ -106,6 +115,60 @@ final class MasterDataImporter
         };
     }
 
+    /** The field that holds a master's code: `code`, unless the import names another (a unit's `unit_code`). */
+    public static function codeKeyOf(array $definition): string
+    {
+        return $definition['import']['code'] ?? 'code';
+    }
+
+    /** What the upload dialog needs to know about the limits. @return array{max_rows: int, max_mb: int} */
+    public static function limits(): array
+    {
+        return ['max_rows' => self::MAX_ROWS, 'max_mb' => intdiv(self::MAX_UPLOAD_KB, 1024)];
+    }
+
+    /**
+     * The sheet's columns as the upload dialog and the review grid show them.
+     *
+     * @return array{columns: list<array<string, mixed>>, match_label: string, samples: int}
+     */
+    public static function describe(array $definition): array
+    {
+        $match = self::matchKeys($definition);
+
+        $columns = array_map(function (array $f) use ($match) {
+            $choices = match (true) {
+                $f['type'] === 'boolean' => [['value' => 'Yes', 'label' => 'Yes'], ['value' => 'No', 'label' => 'No']],
+                $f['type'] === 'multiselect' => null, // a list of codes, typed
+                isset($f['lookup']) => array_map(
+                    fn ($t) => ['value' => $t['code'], 'label' => "{$t['code']} — {$t['label']}".($t['active'] ? '' : ' (inactive)')],
+                    self::lookupTargets($f),
+                ),
+                $f['type'] === 'select' => array_map(fn ($o) => ['value' => $o['label'], 'label' => $o['label']], $f['options']),
+                default => null,
+            };
+
+            return [
+                'key' => $f['key'],
+                'label' => self::heading($f),
+                'type' => $f['type'],
+                'required' => ! empty($f['required']),
+                'uppercase' => ! empty($f['uppercase']),
+                'lowercase' => ! empty($f['lowercase']),
+                'match' => in_array($f['key'], $match, true),
+                'choices' => $choices,
+            ];
+        }, self::columns($definition));
+
+        $labels = array_column($columns, 'label', 'key');
+
+        return [
+            'columns' => $columns,
+            'match_label' => implode(' + ', array_map(fn ($k) => $labels[$k], $match)),
+            'samples' => count($definition['import']['examples'] ?? []),
+        ];
+    }
+
     /** @return list<string> The field(s) that identify a row. */
     public static function matchKeys(array $definition): array
     {
@@ -122,7 +185,7 @@ final class MasterDataImporter
         $spec = $field['lookup'];
         $code = $spec['code'] ?? 'code';
 
-        return $spec['model']::query()->orderBy($code)->get()
+        return $spec['model']::query()->with($spec['with'] ?? [])->orderBy($code)->get()
             ->map(fn (Model $m) => [
                 'id' => (int) $m->getKey(),
                 'code' => (string) $m->getAttribute($code),
@@ -274,7 +337,7 @@ final class MasterDataImporter
      */
     private function analyse(array $records): array
     {
-        $this->suggester = $this->codeKey ? new CodeSuggester($this->definition['model']) : null;
+        $this->suggester = $this->codeKey ? new CodeSuggester($this->definition['model'], $this->codeKey, $this->unitCodes) : null;
 
         $items = [];
         foreach (array_slice(array_values($records), 0, self::MAX_ROWS) as $record) {
@@ -311,7 +374,7 @@ final class MasterDataImporter
             'cells' => [], 'present' => [], 'values' => [],
             'errors' => [], 'row_errors' => [], 'warnings' => [], 'suggestions' => [],
             'record' => null, 'data' => [], 'attributes' => [], 'relations' => [], 'status' => null,
-            'sample' => false, 'sample_guessed' => false,
+            'sample' => false, 'sample_guessed' => false, 'trashed' => false,
         ];
 
         foreach ($this->columns as $field) {
@@ -486,25 +549,48 @@ final class MasterDataImporter
             return;
         }
 
-        $query = $this->definition['model']::query()->with($this->relations());
-        foreach ($wanted as $field => $values) {
-            $query->whereIn($field, array_values(array_unique($values)));
-        }
+        $matching = function ($query) use ($wanted) {
+            foreach ($wanted as $field => $values) {
+                $values = array_values(array_unique($values));
+                if ($field === $this->codeKey) {
+                    // F02-PDD finds f02-pdd: codes are the same whatever their letters' case.
+                    $query->whereIn(DB::raw('LOWER('.DB::getQueryGrammar()->wrap($field).')'), array_map('mb_strtolower', array_map('strval', $values)));
+                } else {
+                    $query->whereIn($field, $values);
+                }
+            }
+
+            return $query;
+        };
 
         $saved = [];
-        foreach ($query->get() as $record) {
+        foreach ($matching($this->definition['model']::query()->with($this->relations()))->get() as $record) {
             $saved[$this->keyOf(fn ($f) => $record->getAttribute($f))] = $record;
+        }
+
+        // A record in the Trash keeps its code, so a row for it cannot add a new record.
+        $trashed = [];
+        if ($this->usesTrash()) {
+            foreach ($matching($this->definition['model']::onlyTrashed())->get() as $record) {
+                $trashed[$this->keyOf(fn ($f) => $record->getAttribute($f))] = $record;
+            }
         }
 
         foreach ($items as &$item) {
             if (($key = $this->matchValue($item)) !== null) {
                 $item['record'] = $saved[$key] ?? null;
+                $item['trashed'] = $item['record'] === null && isset($trashed[$key]);
             }
             // A saved code is real data, even when it reads exactly like a sample (e.g. CL, Casual Leave).
-            if ($item['sample_guessed'] && $item['record'] !== null) {
+            if ($item['sample_guessed'] && ($item['record'] !== null || $item['trashed'])) {
                 $item['sample'] = false;
             }
         }
+    }
+
+    private function usesTrash(): bool
+    {
+        return in_array(SoftDeletes::class, class_uses_recursive($this->definition['model']), true);
     }
 
     /** The match field(s) must be filled in, and may appear only once per file. */
@@ -526,6 +612,12 @@ final class MasterDataImporter
             }
             if ($missing) {
                 continue;
+            }
+
+            if ($item['trashed']) {
+                $at = $this->codeKey ?? end($this->match);
+                $item['errors'][$at] ??= self::heading($this->fields[$at])." {$item['cells'][$at]} belongs to a ".mb_strtolower($this->definition['singular'])
+                    .' in the Trash. Restore it there, or delete it permanently, to use this code again.';
             }
 
             $key = $this->matchValue($item);
@@ -729,7 +821,7 @@ final class MasterDataImporter
             if (isset($item['errors'][$key])) {
                 $suggestion = match (true) {
                     $code === '' => $series !== null ? $this->suggester->next($series, $scope) : null,
-                    ! Code::isValid($code) => $this->suggester->free($code, $scope),
+                    ! ($this->unitCodes ? Code::isValidUnit($code) : Code::isValid($code)) => $this->suggester->free($code, $scope),
                     default => $this->suggester->next($code, $scope),
                 };
             } elseif ($item['status'] === 'update' && isset($this->fields[$title], $item['values'][$title])

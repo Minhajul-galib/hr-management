@@ -17,7 +17,7 @@ const props = defineProps({
     template: { type: Object, required: true },
 });
 
-const { canManage, canUpdateCap } = useAuditPermissions();
+const { canCreate, canEdit, canDelete, canReopen, canUpdateCap } = useAuditPermissions();
 const isCompleted = computed(() => props.audit.status === 'completed');
 
 // ----- summaries -----
@@ -143,19 +143,17 @@ const actionLink = 'inline-flex items-center gap-1.5 rounded-md border border-gr
                 </div>
                 <div class="flex flex-wrap gap-2">
                     <a :href="route('audits.print', audit.id)" target="_blank" :class="actionLink"><Printer :size="15" /> Print</a>
-                    <template v-if="canManage">
-                        <template v-if="!isCompleted">
-                            <Link :href="route('audits.edit', audit.id)" class="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500">
-                                <Pencil :size="15" /> Continue editing
-                            </Link>
-                            <button type="button" :class="[actionLink, 'text-red-600 dark:text-red-400']" @click="deleteAudit"><Trash2 :size="15" /> Delete</button>
-                        </template>
-                        <template v-else>
-                            <Link :href="route('audits.create', { from: audit.id })" class="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500">
-                                <CopyPlus :size="15" /> Start follow-up
-                            </Link>
-                            <button type="button" :class="actionLink" @click="reopenAudit"><RotateCcw :size="15" /> Reopen</button>
-                        </template>
+                    <template v-if="!isCompleted">
+                        <Link v-if="canEdit" :href="route('audits.edit', audit.id)" class="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500">
+                            <Pencil :size="15" /> Continue editing
+                        </Link>
+                        <button v-if="canDelete" type="button" :class="[actionLink, 'text-red-600 dark:text-red-400']" @click="deleteAudit"><Trash2 :size="15" /> Delete</button>
+                    </template>
+                    <template v-else>
+                        <Link v-if="canCreate" :href="route('audits.create', { from: audit.id })" class="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500">
+                            <CopyPlus :size="15" /> Start follow-up
+                        </Link>
+                        <button v-if="canReopen" type="button" :class="actionLink" @click="reopenAudit"><RotateCcw :size="15" /> Reopen</button>
                     </template>
                 </div>
             </div>

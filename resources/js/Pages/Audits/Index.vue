@@ -13,7 +13,7 @@ const props = defineProps({
     template: { type: Object, required: true },
 });
 
-const { canManage } = useAuditPermissions();
+const { canCreate, canEdit, canDelete } = useAuditPermissions();
 
 const search = ref('');
 const unitFilter = ref('');
@@ -96,7 +96,7 @@ const statCards = computed(() => [
                     <p>Social compliance audits of our factories and their corrective action plans.</p>
                 </div>
                 <Link
-                    v-if="canManage"
+                    v-if="canCreate"
                     :href="route('audits.create')"
                     class="inline-flex items-center gap-2 self-start rounded-md bg-indigo-600 px-4 py-2 text-xs font-semibold uppercase tracking-widest text-white hover:bg-indigo-500 sm:self-auto"
                 >
@@ -233,24 +233,22 @@ const statCards = computed(() => [
                                             <a :href="route('audits.print', audit.id)" target="_blank" title="Print report" class="hover:text-indigo-600 dark:hover:text-indigo-400">
                                                 <Printer :size="17" />
                                             </a>
-                                            <template v-if="canManage">
-                                                <template v-if="audit.status === 'draft'">
-                                                    <Link :href="route('audits.edit', audit.id)" title="Edit" class="hover:text-indigo-600 dark:hover:text-indigo-400">
-                                                        <Pencil :size="17" />
-                                                    </Link>
-                                                    <button type="button" title="Delete draft" class="hover:text-red-600 dark:hover:text-red-400" @click="deleteAudit(audit)">
-                                                        <Trash2 :size="17" />
-                                                    </button>
-                                                </template>
-                                                <Link
-                                                    v-else
-                                                    :href="route('audits.create', { from: audit.id })"
-                                                    title="Start follow-up audit"
-                                                    class="hover:text-indigo-600 dark:hover:text-indigo-400"
-                                                >
-                                                    <CopyPlus :size="17" />
+                                            <template v-if="audit.status === 'draft'">
+                                                <Link v-if="canEdit" :href="route('audits.edit', audit.id)" title="Edit" class="hover:text-indigo-600 dark:hover:text-indigo-400">
+                                                    <Pencil :size="17" />
                                                 </Link>
+                                                <button v-if="canDelete" type="button" title="Delete draft" class="hover:text-red-600 dark:hover:text-red-400" @click="deleteAudit(audit)">
+                                                    <Trash2 :size="17" />
+                                                </button>
                                             </template>
+                                            <Link
+                                                v-else-if="canCreate"
+                                                :href="route('audits.create', { from: audit.id })"
+                                                title="Start follow-up audit"
+                                                class="hover:text-indigo-600 dark:hover:text-indigo-400"
+                                            >
+                                                <CopyPlus :size="17" />
+                                            </Link>
                                         </div>
                                     </td>
                                 </tr>
@@ -261,7 +259,7 @@ const statCards = computed(() => [
                                             {{ audits.length ? 'No audits match your filters.' : 'No audits have been recorded yet.' }}
                                         </p>
                                         <Link
-                                            v-if="!audits.length && canManage"
+                                            v-if="!audits.length && canCreate"
                                             :href="route('audits.create')"
                                             class="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
                                         >

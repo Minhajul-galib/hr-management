@@ -18,13 +18,14 @@ class DashboardController extends Controller
         // they get a thank-you page. If an admin later grants the Applicant role
         // `view dashboard`, they get the real dashboard like anyone else.
         if (! $isSuperAdmin && $user->hasRole('Applicant') && ! $user->can('view dashboard')) {
-            $user->loadMissing('designation:id,code,title');
+            $user->loadMissing('designation:id,designation_category_id,code,title', 'designation.category:id,name');
 
             return Inertia::render('Dashboard/Applicant', [
                 'applicant' => [
                     'name'        => $user->name,
                     'email'       => $user->email,
                     'designation' => $user->designation?->title,
+                    'designation_category' => $user->designation?->category?->name,
                 ],
             ]);
         }

@@ -32,9 +32,9 @@ class RegistrationTest extends TestCase
 
     public function test_registration_screen_lists_only_active_designations(): void
     {
-        Designation::create(['code' => 'mgr', 'title' => 'Manager', 'serial' => 2]);
-        Designation::create(['code' => 'dir', 'title' => 'Director', 'serial' => 1]);
-        Designation::create(['code' => 'old', 'title' => 'Retired Post', 'serial' => 3, 'is_active' => false]);
+        Designation::create(['designation_category_id' => $this->designationCategory()->id, 'code' => 'mgr', 'title' => 'Manager', 'serial' => 2]);
+        Designation::create(['designation_category_id' => $this->designationCategory()->id, 'code' => 'dir', 'title' => 'Director', 'serial' => 1]);
+        Designation::create(['designation_category_id' => $this->designationCategory()->id, 'code' => 'old', 'title' => 'Retired Post', 'serial' => 3, 'is_active' => false]);
 
         $this->get('/register')->assertInertia(fn (Assert $page) => $page
             ->component('Auth/Register')
@@ -45,7 +45,7 @@ class RegistrationTest extends TestCase
 
     public function test_new_users_can_register_as_applicant_with_a_designation(): void
     {
-        $designation = Designation::create(['code' => 'mgr', 'title' => 'Manager']);
+        $designation = Designation::create(['designation_category_id' => $this->designationCategory()->id, 'code' => 'mgr', 'title' => 'Manager']);
 
         $response = $this->post('/register', $this->payload(['designation_id' => $designation->id]));
 
@@ -59,7 +59,7 @@ class RegistrationTest extends TestCase
 
     public function test_designation_is_required_once_designations_exist(): void
     {
-        Designation::create(['code' => 'mgr', 'title' => 'Manager']);
+        Designation::create(['designation_category_id' => $this->designationCategory()->id, 'code' => 'mgr', 'title' => 'Manager']);
 
         $this->post('/register', $this->payload())->assertSessionHasErrors('designation_id');
         $this->assertGuest();
@@ -67,8 +67,8 @@ class RegistrationTest extends TestCase
 
     public function test_an_inactive_or_unknown_designation_is_rejected(): void
     {
-        $inactive = Designation::create(['code' => 'old', 'title' => 'Retired Post', 'is_active' => false]);
-        Designation::create(['code' => 'mgr', 'title' => 'Manager']);
+        $inactive = Designation::create(['designation_category_id' => $this->designationCategory()->id, 'code' => 'old', 'title' => 'Retired Post', 'is_active' => false]);
+        Designation::create(['designation_category_id' => $this->designationCategory()->id, 'code' => 'mgr', 'title' => 'Manager']);
 
         $this->post('/register', $this->payload(['designation_id' => $inactive->id]))
             ->assertSessionHasErrors('designation_id');
@@ -87,7 +87,7 @@ class RegistrationTest extends TestCase
 
     public function test_a_new_applicant_sees_the_thank_you_page_with_email_and_designation(): void
     {
-        $designation = Designation::create(['code' => 'mgr', 'title' => 'Manager']);
+        $designation = Designation::create(['designation_category_id' => $this->designationCategory()->id, 'code' => 'mgr', 'title' => 'Manager']);
 
         $this->post('/register', $this->payload(['designation_id' => $designation->id]));
 

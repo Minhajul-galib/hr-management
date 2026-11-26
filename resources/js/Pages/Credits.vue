@@ -1,70 +1,7 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { Head } from '@inertiajs/vue3';
-import { Heart, Code2, Star, Globe, Cpu, Lightbulb, Database, Users, Wrench } from 'lucide-vue-next';
-
-const people = [
-    {
-        name: 'Md. Joynul Abedin Chowdhury',
-        role: 'Project Initiator & Decision Maker',
-        department: 'Director',
-        avatar: '🧠',
-        highlight: false,
-        contributions: [
-            'Conceived the idea and took the main initiative to build this ERP system',
-            'Defined the overall vision and scope of the project',
-            'Provided key instructions and direction throughout development',
-            'Made critical decisions on features, priorities, and timelines',
-            'Drove the project forward with consistent leadership and decisive action',
-        ],
-    },
-    {
-        name: 'Minhajul Islam Galib',
-        role: 'Full Developer',
-        department: 'Engineering',
-        avatar: '👨‍💻',
-        highlight: true,
-        contributions: [
-            'Complete frontend development — all Vue 3 components, pages, layouts, dark-mode, responsive design',
-            'Complete backend development — Laravel controllers, models, migrations, policies, observers',
-            'RESTful API design and Inertia.js integration',
-            'Role & permission system architecture',
-            'Supplier management module — CRUD, ledger, tracking, limit alerts',
-            'Document workflow engine with configurable status transitions',
-            'Calendar & Todo system with reminders',
-            'Real-time notifications via Laravel Echo & Pusher',
-            'Excel import/export for suppliers, particulars, and units',
-            'Dashboard analytics with metric cards and charts',
-            'Authentication, impersonation, and profile management',
-            'Load pressure handling — query optimisation, eager loading, pagination',
-            'Deployment configuration and environment setup',
-        ],
-    },
-    {
-        name: 'Mr. Mansur',
-        role: 'Given All Data',
-        department: '',
-        avatar: '📋',
-        highlight: false,
-        contributions: [
-            'Provided all required data for the system',
-            'Supported data collection and validation during development',
-        ],
-    },
-    {
-        name: 'Murad Wahed',
-        role: 'Corporate Advisor',
-        department: 'ERP / Operations',
-        avatar: '🏛️',
-        highlight: false,
-        contributions: [
-            'Shared valuable experience from previous ERP implementations',
-            'Help to identified some potential difficulties and edge cases in a corporate environment',
-            'Advised on best practices for workflow design suited to this organisation',
-            'Provided concept on role distribution and access control strategy',
-        ],
-    },
-];
+import { Heart, Code2, Globe, Cpu, Lightbulb, Database, Wrench } from 'lucide-vue-next';
 
 const tools = [
     { name: 'Laravel 11', role: 'Backend Framework', avatar: '🔴', link: 'https://laravel.com', desc: 'PHP framework powering all server-side logic, routing, and ORM.' },
@@ -132,64 +69,8 @@ const year = new Date().getFullYear();
                     <h1 class="text-2xl font-bold mb-2">Thank You to Everyone Involved</h1>
                     <p class="text-blue-100 max-w-2xl mx-auto text-sm leading-relaxed">
                         This ERP system is the result of hard work, clear vision, and great collaboration.
-                        Below is a full account of every person's contribution and every tool that made it possible.
+                        Below is every tool that made it possible.
                     </p>
-                </div>
-
-                <!-- People Section -->
-                <div>
-                    <h2 class="text-base font-semibold text-gray-700 dark:text-gray-300 mb-4 flex items-center gap-2">
-                        <Users :size="18" class="text-blue-500 dark:text-blue-400" />
-                        People Behind This Project
-                    </h2>
-
-                    <div class="space-y-5">
-                        <div
-                            v-for="(person, i) in people"
-                            :key="i"
-                            :class="[
-                                'rounded-xl border p-5 transition-shadow duration-200 hover:shadow-md',
-                                person.highlight
-                                    ? 'border-blue-300 bg-gradient-to-r from-blue-50 to-indigo-50 dark:border-blue-700 dark:from-blue-900/30 dark:to-indigo-900/20'
-                                    : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
-                            ]"
-                        >
-                            <div class="flex items-start gap-4">
-                                <div class="text-4xl select-none flex-shrink-0 mt-0.5">{{ person.avatar }}</div>
-
-                                <div class="flex-1 min-w-0">
-                                    <div class="flex flex-wrap items-center gap-2 mb-0.5">
-                                        <h3 class="font-bold text-gray-900 dark:text-gray-100 text-base">
-                                            {{ person.name }}
-                                        </h3>
-                                        <span
-                                            v-if="person.highlight"
-                                            class="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-600 text-white"
-                                        >
-                                            <Star :size="10" class="fill-white" /> Lead Developer
-                                        </span>
-                                    </div>
-
-                                    <div class="flex flex-wrap gap-2 mb-3">
-                                        <span class="text-xs font-medium text-blue-600 dark:text-blue-400">{{ person.role }}</span>
-                                        <span class="text-xs text-gray-400 dark:text-gray-500">·</span>
-                                        <span class="text-xs text-gray-500 dark:text-gray-400">{{ person.department }}</span>
-                                    </div>
-
-                                    <ul class="space-y-1.5">
-                                        <li
-                                            v-for="(item, j) in person.contributions"
-                                            :key="j"
-                                            class="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-300 leading-relaxed"
-                                        >
-                                            <span class="mt-0.5 text-blue-400 flex-shrink-0">▸</span>
-                                            {{ item }}
-                                        </li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
                 </div>
 
                 <!-- Tools Section -->
